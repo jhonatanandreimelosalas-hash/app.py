@@ -1,4 +1,3 @@
-import streamlit as pd_st # Solo referencia interna si es necesario
 import streamlit as st
 import pandas as pd
 import openpyxl
@@ -35,13 +34,29 @@ INTEGRANTES_LISTA = [
 ]
 
 def load_excel_data():
-    """Carga los datos del Excel asegurando lectura fresca sin caché bloqueante"""
+    """Carga los datos del Excel limpiando y normalizando los encabezados para que sean editables"""
     try:
         xls = pd.ExcelFile(EXCEL_FILE)
-        sheets = {sheet: pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names}
+        sheets = {}
+        for sheet in xls.sheet_names:
+            df_raw = pd.read_excel(xls, sheet_name=sheet, header=None)
+            
+            # Buscar la fila que contenga los encabezados reales (ej. 'Concepto' o 'Valor')
+            header_row = 0
+            for idx, row in df_raw.iterrows():
+                row_str = row.astype(str).str.lower().values
+                if any('concepto' in str(val) for val in row_str) or any('valor' in str(val) for val in row_str):
+                    header_row = idx
+                    break
+            
+            # Recargar el DataFrame usando la fila correcta como cabecera
+            df = pd.read_excel(xls, sheet_name=sheet, header=header_row)
+            # Eliminar columnas totalmente vacías si las hay
+            df = df.dropna(how='all', axis=1)
+            sheets[sheet] = df
+            
         return sheets
     except Exception:
-        # Si el archivo no existe aún, se pueden retornar DataFrames vacíos base
         return {}
 
 def save_excel_data(df_dict):
@@ -53,7 +68,6 @@ def save_excel_data(df_dict):
     # Dar formato con openpyxl
     wb = openpyxl.load_workbook(EXCEL_FILE)
     
-    # Estilos profesionales
     font_header = Font(name="Arial", size=11, bold=True, color="FFFFFF")
     fill_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid") # Azul institucional
     font_body = Font(name="Arial", size=10)
@@ -68,7 +82,6 @@ def save_excel_data(df_dict):
     for sheet_name in wb.sheetnames:
         ws = wb[sheet_name]
         
-        # Ajustar filas y columnas con bordes y fuentes
         for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column), start=1):
             for cell in row:
                 cell.border = thin_border
@@ -131,15 +144,22 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
 st.sidebar.markdown("---")
 st.sidebar.info("💡 **Sistema de Gestión**\n\nDesarrollado para el control transparente de eventos y recursos.")
 
-# Identificar nombres reales de columnas en las hojas
+# Identificar nombres reales de columnas en las hojas de forma dinámica
 df_ing_raw = data_dict.get('Registro de Ingresos', pd.DataFrame())
 df_gas_raw = data_dict.get('Registro de Gastos', pd.DataFrame())
 
-col_c_ing = df_ing_raw.columns[1] if len(df_ing_raw.columns) > 1 else 'Concepto'
-col_v_ing = df_ing_raw.columns[2] if len(df_ing_raw.columns) > 2 else 'Valor'
+def encontrar_columna(df, palabras_clave):
+    for col in df.columns:
+        col_str = str(col).lower()
+        if any(p in col_str for p in palabras_clave):
+            return col
+    return df.columns[0] if len(df.columns) > 0 else None
 
-col_c_gas = df_gas_raw.columns[1] if len(df_gas_raw.columns) > 1 else 'Concepto'
-col_v_gas = df_gas_raw.columns[3] if len(df_gas_raw.columns) > 3 else 'Valor'
+col_c_ing = encontrar_columna(df_ing_raw, ['concepto', 'detalle', 'descripción'])
+col_v_ing = encontrar_columna(df_ing_raw, ['valor', 'monto', 'total'])
+
+col_c_gas = encontrar_columna(df_gas_raw, ['concepto', 'detalle', 'descripción'])
+col_v_gas = encontrar_columna(df_gas_raw, ['valor', 'monto', 'total'])
 
 # --- 1. INICIO ---
 if menu == "1. Inicio":
@@ -237,8 +257,8 @@ elif menu == "5. Dashboard y Gráficos":
         st.bar_chart(pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [tot_ing, tot_gas]}).set_index("Tipo"))
     with col2:
         st.markdown("#### 🏷️ Gastos por Categoría")
-        if not df_gas_clean.empty and len(df_gas_clean.columns) > 2:
-            col_cat_gas = df_gas_clean.columns[2]
+        col_cat_gas = encontrar_columna(df_gas_clean, ['categoría', 'categoria', 'tipo'])
+        if not df_gas_clean.empty and col_cat_gas in df_gas_clean.columns:
             df_g_copy = df_gas_clean.copy()
             df_g_copy[col_v_gas] = pd.to_numeric(df_g_copy[col_v_gas], errors='coerce')
             st.bar_chart(df_g_copy.groupby(col_cat_gas)[col_v_gas].sum())
