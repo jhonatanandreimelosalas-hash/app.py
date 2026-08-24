@@ -52,7 +52,7 @@ if menu == "1. Inicio":
     st.markdown("### 📋 1. Información General del Proyecto")
     st.info("**Nombre del Proyecto:** Plantilla Estándar de Presupuesto y Balance de Eventos")
     st.info("**Objetivo:** Registrar recaudos y gastos para calcular la ganancia o saldo final.")
-    st.info("**Versión:** v2.2 (Interactiva y Sincronizada)")
+    st.info("**Versión:** v2.3 (Optimizado y Conectado)")
     
     st.markdown("### 👥 2. Equipo / Integrantes")
     integrantes_data = [
@@ -179,55 +179,104 @@ elif menu == "5. Dashboard y Gráficos":
         else:
             st.info("No hay suficientes datos de categorías.")
 
-# --- 6. ANEXO DE RECIBOS & QR ---
+# --- 6. ANEXO DE RECIBOS & QR (CONECTADO A INGRESOS Y GASTOS) ---
 elif menu == "6. Anexo de Recibos & QR":
-    st.title("🧾 Generador Automático de Recibos y Códigos QR")
-    df_anexo = data_dict['Anexo de recibos']
-    st.dataframe(df_anexo, use_container_width=True)
+    st.title("🧾 Generador de Comprobantes y QR desde Registros")
+    st.markdown("Selecciona cualquier movimiento real registrado en tus ingresos o gastos para generarle su comprobante oficial y código QR.")
     
-    if 'ultimo_recibo_texto' not in st.session_state: st.session_state.ultimo_recibo_texto = None
-    if 'ultimo_recibo_id' not in st.session_state: st.session_state.ultimo_recibo_id = None
-    if 'ultimo_qr_img' not in st.session_state: st.session_state.ultimo_qr_img = None
+    df_ing = data_dict['Registro de Ingresos']
+    df_gas = data_dict['Registro de Gastos']
+    
+    # Unificar ingresos y gastos en una sola lista seleccionable
+    opciones_movimientos = []
+    
+    if not df_ing.empty and 'Concepto' in df_ing.columns:
+        for idx, row in df_ing.iterrows():
+            opciones_movimientos.append(f"[INGRESO] {row.get('Fecha', '')} - {row.get('Concepto', '')} (${row.get('Valor', 0):,.0f})")
+            
+    if not df_gas.empty and 'Concepto' in df_gas.columns:
+        for idx, row in df_gas.iterrows():
+            opciones_movimientos.append(f"[GASTO] {row.get('Fecha', '')} - {row.get('Concepto', '')} (${row.get('Valor', 0):,.0f})")
 
-    with st.form("form_qr_auto"):
-        col1, col2 = st.columns(2)
-        with col1:
-            rec_id = st.text_input("ID Recibo", value=f"REC-00{len(df_anexo)+1}")
-            fecha = st.date_input("Fecha")
-            tipo = st.selectbox("Tipo de Movimiento", ["Ingreso", "Gasto"])
-            concepto = st.text_input("Concepto (ej. Pago de sonido / Venta boleta)")
-        with col2:
-            valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
-            responsable = st.selectbox("Responsable que emite", INTEGRANTES_LISTA)
+    if not opciones_movimientos:
+        st.warning("Primero debes registrar al menos un ingreso o un gasto en las secciones anteriores.")
+    else:
+        movimiento_seleccionado = st.selectbox("Selecciona el Ingreso o Gasto a certificar:", opciones_movimientos)
+        
+        if st.button("Generar Comprobante y QR del Movimiento"):
+            # Extraer datos de la opción seleccionada
+            tipo_mov = "Ingreso" if "[INGRESO]" in movimiento_seleccionado else "Gasto"
+            rec_id = f"REC-{abs(hash(movimiento_seleccionado)) % 10000:04d}"
             
-        if st.form_submit_button("Generar Comprobante y QR"):
-            texto_recibo = f"=== COMPROBANTE OFICIAL DE EVENTO ===\nID: {rec_id}\nFecha: {fecha}\nTipo: {tipo}\nConcepto: {concepto}\nValor: ${valor:,.0f} COP\nResponsable: {responsable}\nEstado: Registrado y Verificado"
-            texto_qr = f"ID:{rec_id}|TIPO:{tipo}|CONCEPTO:{concepto}|VALOR:${valor:,.0f}COP|RESP:{responsable}|ESTADO:OK"
+            # Buscar el detalle exacto en los dataframes
+            if tipo_mov == "Ingreso":
+                fila_encontrada = df_ing[df_ing.apply(lambda r: f"[INGRESO] {r.get('Fecha', '')} - {r.get('Concepto', '')} (${r.get('Valor', 0):,.0f})" == movimiento_seleccionado, axis=1)]
+            else:
+                fila_encontrada = df_gas[df_gas.apply(lambda r: f"[GASTO] {r.get('Fecha', '')} - {r.get('Concepto', '')} (${r.get('Valor', 0):,.0f})" == movimiento_seleccionado, axis=1)]
             
-            qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
-            qr.add_data(texto_qr)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            
-            buf = BytesIO()
-            img.save(buf, format="PNG")
-            
-            nuevo_anexo = pd.DataFrame({'ID': [rec_id], 'Fecha': [str(fecha)], 'Tipo (Ingreso/Gasto)': [tipo], 'Concepto': [concepto], 'Valor': [valor], 'Nombre del archivo o enlace': [f"Comprobante_{rec_id}.txt"], 'Código QR': [f"QR Oficial - {concepto}"]})
-            data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
-            save_excel_data(data_dict)
-            
-            st.session_state.ultimo_recibo_texto = texto_recibo
-            st.session_state.ultimo_recibo_id = rec_id
-            st.session_state.ultimo_qr_img = buf.getvalue()
-            st.success("¡Comprobante y QR generado con éxito!")
+            if not fila_encontrada.empty:
+                f_data = fila_encontrada.iloc[0]
+                fecha = f_data.get('Fecha', 'N/A')
+                concepto = f_data.get('Concepto', 'N/A')
+                valor = float(f_data.get('Valor', 0))
+                responsable = f_data.get('Responsable', 'Equipo')
+                obs = f_data.get('Observaciones', f_data.get('Categoría', 'General'))
+                
+                texto_recibo = (
+                    f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
+                    f"ID: {rec_id}\n"
+                    f"Tipo: {tipo_mov}\n"
+                    f"Fecha: {fecha}\n"
+                    f"Concepto: {concepto}\n"
+                    f"Categoría/Obs: {obs}\n"
+                    f"Valor: ${valor:,.0f} COP\n"
+                    f"Responsable: {responsable}\n"
+                    f"Estado: Verificado y Aprobado"
+                )
+                
+                texto_qr = f"ID:{rec_id}|TIPO:{tipo_mov}|CONCEPTO:{concepto}|VALOR:${valor:,.0f}COP|RESP:{responsable}|OK"
+                
+                qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
+                qr.add_data(texto_qr)
+                qr.make(fit=True)
+                img = qr.make_image(fill_color="black", back_color="white")
+                
+                buf = BytesIO()
+                img.save(buf, format="PNG")
+                
+                # Guardar en la hoja de anexo del excel
+                df_anexo = data_dict['Anexo de recibos']
+                nuevo_anexo = pd.DataFrame({
+                    'ID': [rec_id],
+                    'Fecha': [str(fecha)],
+                    'Tipo (Ingreso/Gasto)': [tipo_mov],
+                    'Concepto': [concepto],
+                    'Valor': [valor],
+                    'Nombre del archivo o enlace': [f"Comprobante_{rec_id}.txt"],
+                    'Código QR': [f"QR Oficial - {concepto}"]
+                })
+                data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
+                save_excel_data(data_dict)
+                
+                st.session_state.ultimo_recibo_texto = texto_recibo
+                st.session_state.ultimo_recibo_id = rec_id
+                st.session_state.ultimo_qr_img = buf.getvalue()
+                st.success("¡Comprobante vinculado y generado con éxito!")
 
-    if st.session_state.ultimo_recibo_texto is not None:
+    if 'ultimo_recibo_texto' in st.session_state and st.session_state.ultimo_recibo_texto is not None:
         st.markdown("---")
         st.subheader(f"📄 Vista Previa: {st.session_state.ultimo_recibo_id}")
         c1, c2 = st.columns(2)
-        with c1: st.text(st.session_state.ultimo_recibo_texto)
-        with c2: st.image(st.session_state.ultimo_qr_img, width=180)
-        st.download_button(label="📥 Descargar Comprobante (.txt)", data=st.session_state.ultimo_recibo_texto, file_name=f"{st.session_state.ultimo_recibo_id}.txt", mime="text/plain")
+        with c1: 
+            st.text(st.session_state.ultimo_recibo_texto)
+        with c2: 
+            st.image(st.session_state.ultimo_qr_img, width=180)
+        st.download_button(
+            label="📥 Descargar Comprobante (.txt)", 
+            data=st.session_state.ultimo_recibo_texto, 
+            file_name=f"{st.session_state.ultimo_recibo_id}.txt", 
+            mime="text/plain"
+        )
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
