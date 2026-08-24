@@ -1,6 +1,9 @@
+import streamlit as pd_st # Solo referencia interna si es necesario
 import streamlit as st
 import pandas as pd
 import openpyxl
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 import qrcode
 from io import BytesIO
 
@@ -31,16 +34,62 @@ INTEGRANTES_LISTA = [
     "Alejandro Martinez Rubio"
 ]
 
-@st.cache_data
 def load_excel_data():
-    xls = pd.ExcelFile(EXCEL_FILE)
-    sheets = {sheet: pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names}
-    return sheets
+    """Carga los datos del Excel asegurando lectura fresca sin caché bloqueante"""
+    try:
+        xls = pd.ExcelFile(EXCEL_FILE)
+        sheets = {sheet: pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names}
+        return sheets
+    except Exception:
+        # Si el archivo no existe aún, se pueden retornar DataFrames vacíos base
+        return {}
 
 def save_excel_data(df_dict):
+    """Guarda los datos en Excel aplicando formato profesional celda por celda (bordes, colores, alineación)"""
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         for sheet_name, df in df_dict.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
+            
+    # Dar formato con openpyxl
+    wb = openpyxl.load_workbook(EXCEL_FILE)
+    
+    # Estilos profesionales
+    font_header = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+    fill_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid") # Azul institucional
+    font_body = Font(name="Arial", size=10)
+    
+    thin_border = Border(
+        left=Side(style='thin', color='D3D3D3'),
+        right=Side(style='thin', color='D3D3D3'),
+        top=Side(style='thin', color='D3D3D3'),
+        bottom=Side(style='thin', color='D3D3D3')
+    )
+    
+    for sheet_name in wb.sheetnames:
+        ws = wb[sheet_name]
+        
+        # Ajustar filas y columnas con bordes y fuentes
+        for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column), start=1):
+            for cell in row:
+                cell.border = thin_border
+                if row_idx == 1:
+                    cell.font = font_header
+                    cell.fill = fill_header
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                else:
+                    cell.font = font_body
+                    cell.alignment = Alignment(horizontal="left", vertical="center")
+                    
+        # Auto-ajustar ancho de columnas
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                if cell.value:
+                    max_len = max(max_len, len(str(cell.value)))
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
+            
+    wb.save(EXCEL_FILE)
     st.cache_data.clear()
 
 def limpiar_y_obtener_datos(df, col_concepto, col_valor):
@@ -49,7 +98,6 @@ def limpiar_y_obtener_datos(df, col_concepto, col_valor):
         return pd.DataFrame()
     
     df_temp = df.copy()
-    
     filtro_validos = []
     for idx, row in df_temp.iterrows():
         concepto_val = str(row.get(col_concepto, '')).strip().lower()
@@ -58,10 +106,14 @@ def limpiar_y_obtener_datos(df, col_concepto, col_valor):
             
     return df_temp.loc[filtro_validos]
 
-try:
-    data_dict = load_excel_data()
-except Exception as e:
-    st.error(f"⚠️ Error al cargar el archivo Excel: {e}")
+# Inicializar estado de datos en session_state para permitir edición fluida
+if 'data_dict' not in st.session_state:
+    st.session_state.data_dict = load_excel_data()
+
+data_dict = st.session_state.data_dict
+
+if not data_dict:
+    st.error(f"⚠️ No se pudo cargar el archivo '{EXCEL_FILE}'. Asegúrate de que esté en el mismo directorio.")
     st.stop()
 
 # --- MENÚ LATERAL ESTILIZADO ---
@@ -118,15 +170,15 @@ elif menu == "2. Registro de Ingresos":
     st.markdown('<p class="sub-header">Administra y edita directamente las entradas económicas del evento</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    edited_ingresos = st.data_editor(df_ing_raw, use_container_width=True, num_rows="dynamic", key="editor_ingresos")
+    edited_ingresos = st.data_editor(df_ing_raw, use_container_width=True, num_rows="dynamic", key="editor_ingresos_tabla")
     
     st.markdown("")
-    col_btn1, col_btn2 = st.columns([1, 4])
+    col_btn1, _ = st.columns([1, 4])
     with col_btn1:
-        if st.button("💾 Guardar Cambios"):
-            data_dict['Registro de Ingresos'] = edited_ingresos
-            save_excel_data(data_dict)
-            st.success("¡Cambios guardados correctamente!")
+        if st.button("💾 Guardar Cambios Ingresos"):
+            st.session_state.data_dict['Registro de Ingresos'] = edited_ingresos
+            save_excel_data(st.session_state.data_dict)
+            st.success("¡Ingresos guardados y formateados en Excel correctamente!")
             st.rerun()
 
 # --- 3. REGISTRO DE GASTOS ---
@@ -135,15 +187,15 @@ elif menu == "3. Registro de Gastos":
     st.markdown('<p class="sub-header">Controla los egresos, compras e inversiones realizadas</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    edited_gastos = st.data_editor(df_gas_raw, use_container_width=True, num_rows="dynamic", key="editor_gastos")
+    edited_gastos = st.data_editor(df_gas_raw, use_container_width=True, num_rows="dynamic", key="editor_gastos_tabla")
     
     st.markdown("")
-    col_btn1, col_btn2 = st.columns([1, 4])
+    col_btn1, _ = st.columns([1, 4])
     with col_btn1:
-        if st.button("💾 Guardar Cambios"):
-            data_dict['Registro de Gastos'] = edited_gastos
-            save_excel_data(data_dict)
-            st.success("¡Cambios de gastos guardados correctamente!")
+        if st.button("💾 Guardar Cambios Gastos"):
+            st.session_state.data_dict['Registro de Gastos'] = edited_gastos
+            save_excel_data(st.session_state.data_dict)
+            st.success("¡Gastos guardados y formateados en Excel correctamente!")
             st.rerun()
 
 # --- 4. BALANCE FINANCIERO ---
