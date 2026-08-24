@@ -281,8 +281,17 @@ elif menu == "6. Anexo de Recibos & QR":
                 f"Estado: Registrado y Verificado"
             )
             
-            qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(texto_recibo)
+            # TEXTO CORTO Y LIMPIO PARA EL QR (Garantiza lectura rápida y sin errores en celulares)
+            texto_qr = f"RECIBO:{rec_id}|{tipo}|{concepto}|${valor:,.0f}|{responsable}"
+            
+            # Configuración optimizada del QR
+            qr = qrcode.QRCode(
+                version=None,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=8,
+                border=2,
+            )
+            qr.add_data(texto_qr)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
             
