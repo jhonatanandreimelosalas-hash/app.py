@@ -9,6 +9,14 @@ st.set_page_config(page_title="Gestión Financiera - Prototipo Eventos", page_ic
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
+# Lista oficial de integrantes para menús desplegables
+INTEGRANTES_LISTA = [
+    "Ivan Santiago Valencia Villamil",
+    "Nicol Vanegas Cruz",
+    "Jhonatan Andrey Melo",
+    "Alejandro Martinez Rubio"
+]
+
 @st.cache_data
 def load_excel_data():
     xls = pd.ExcelFile(EXCEL_FILE)
@@ -46,7 +54,7 @@ if menu == "1. Inicio":
     st.markdown("### 📋 1. Información General del Proyecto")
     st.info("**Nombre del Proyecto:** Plantilla Estándar de Presupuesto y Balance de Eventos")
     st.info("**Objetivo:** Registrar recaudos y gastos para calcular la ganancia o saldo final.")
-    st.info("**Versión:** v2.0 (Aplicación Interactiva)")
+    st.info("**Versión:** v2.1 (Aplicación Interactiva Mejorada)")
     st.info("**Estado:** En Desarrollo / Proyecto Base")
     
     st.markdown("### 👥 2. Equipo de Trabajo / Integrantes")
@@ -66,8 +74,16 @@ elif menu == "2. Registro de Ingresos":
     # Limpiar filas nulas si las hay
     df_ingresos = df_ingresos.dropna(subset=['Fecha']) if 'Fecha' in df_ingresos.columns else df_ingresos
     
-    st.dataframe(df_ingresos, use_container_width=True)
+    st.markdown("### 📝 Tabla Interactiva (Puedes editar celdas o borrar filas directamente)")
+    edited_ingresos = st.data_editor(df_ingresos, use_container_width=True, num_rows="dynamic", key="editor_ingresos")
     
+    if st.button("💾 Guardar cambios de la tabla"):
+        data_dict['Registro de Ingresos'] = edited_ingresos
+        save_excel_data(data_dict)
+        st.success("¡Cambios guardados correctamente en el Excel!")
+        st.rerun()
+    
+    st.markdown("---")
     st.markdown("### ➕ Agregar Nuevo Ingreso")
     with st.form("form_ingreso"):
         col1, col2 = st.columns(2)
@@ -76,7 +92,7 @@ elif menu == "2. Registro de Ingresos":
             concepto = st.text_input("Concepto (ej. Venta de boletas)")
             valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
         with col2:
-            responsable = st.text_input("Responsable", value="Nicol Vanegas Cruz")
+            responsable = st.selectbox("Responsable", INTEGRANTES_LISTA, index=1)
             observaciones = st.text_area("Observaciones")
         
         submitted = st.form_submit_button("Guardar Ingreso")
@@ -91,7 +107,7 @@ elif menu == "2. Registro de Ingresos":
             data_dict['Registro de Ingresos'] = pd.concat([df_ingresos, nuevo_reg], ignore_index=True)
             save_excel_data(data_dict)
             st.success("¡Ingreso agregado y guardado en el Excel correctamente!")
-            st.experimental_rerun()
+            st.rerun()
 
 # --- 3. REGISTRO DE GASTOS ---
 elif menu == "3. Registro de Gastos":
@@ -99,8 +115,16 @@ elif menu == "3. Registro de Gastos":
     df_gastos = data_dict['Registro de Gastos']
     df_gastos = df_gastos.dropna(subset=['Fecha']) if 'Fecha' in df_gastos.columns else df_gastos
     
-    st.dataframe(df_gastos, use_container_width=True)
+    st.markdown("### 📝 Tabla Interactiva (Puedes editar celdas o borrar filas directamente)")
+    edited_gastos = st.data_editor(df_gastos, use_container_width=True, num_rows="dynamic", key="editor_gastos")
     
+    if st.button("💾 Guardar cambios de la tabla de gastos"):
+        data_dict['Registro de Gastos'] = edited_gastos
+        save_excel_data(data_dict)
+        st.success("¡Cambios de gastos guardados correctamente en el Excel!")
+        st.rerun()
+        
+    st.markdown("---")
     st.markdown("### ➕ Agregar Nuevo Gasto")
     with st.form("form_gasto"):
         col1, col2 = st.columns(2)
@@ -110,7 +134,7 @@ elif menu == "3. Registro de Gastos":
             categoria = st.selectbox("Categoría", ["Logística", "Publicidad", "Alimentación", "Varios"])
         with col2:
             valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
-            responsable = st.text_input("Responsable", value="Jhonatan Andrey Melo")
+            responsable = st.selectbox("Responsable", INTEGRANTES_LISTA, index=2)
             observaciones = st.text_area("Observaciones")
         
         submitted = st.form_submit_button("Guardar Gasto")
@@ -126,13 +150,12 @@ elif menu == "3. Registro de Gastos":
             data_dict['Registro de Gastos'] = pd.concat([df_gastos, nuevo_reg], ignore_index=True)
             save_excel_data(data_dict)
             st.success("¡Gasto agregado y guardado en el Excel correctamente!")
-            st.experimental_rerun()
+            st.rerun()
 
 # --- 4. BALANCE FINANCIERO ---
 elif menu == "4. Balance Financiero":
     st.title("⚖️ Balance Financiero General")
     
-    # Calcular totales desde los DataFrames actuales
     df_ing = data_dict['Registro de Ingresos']
     df_gas = data_dict['Registro de Gastos']
     
@@ -201,7 +224,6 @@ elif menu == "6. Anexo de Recibos & QR":
             
         submitted = st.form_submit_button("Generar QR y Guardar en Anexo")
         if submitted:
-            # Generar QR dinámico
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
             qr.add_data(enlace)
             qr.make(fit=True)
@@ -210,7 +232,6 @@ elif menu == "6. Anexo de Recibos & QR":
             buf = BytesIO()
             img.save(buf, format="PNG")
             
-            # Guardar en dataframe
             nuevo_anexo = pd.DataFrame({
                 'ID': [rec_id],
                 'Fecha': [str(fecha)],
@@ -250,6 +271,6 @@ elif menu == "7. Reporte Final":
         st.download_button(
             label="Descargar Excel Completo con Nuevos Registros",
             data=f,
-            file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx",
+            file_name="Proyecto_Financiero_Eventos_Actualizado (1).xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
