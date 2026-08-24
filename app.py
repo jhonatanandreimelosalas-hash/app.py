@@ -1,31 +1,18 @@
 import streamlit as st
 import pandas as pd
 import openpyxl
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-from openpyxl.utils import get_column_letter
 import qrcode
 from io import BytesIO
+from PIL import Image
+from reportlab.lib.pagesizes import letter
+from reportlab.pdfgen import canvas
+from pdf2image import convert_from_bytes
 
-# Configuración inicial de la página
-st.set_page_config(
-    page_title="Gestión Financiera - Prototipo Eventos", 
-    page_icon="💰", 
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# Estilos CSS personalizados para mejorar la estética visual
-st.markdown("""
-    <style>
-        .main-header { font-size: 2.2rem; color: #1E3A8A; font-weight: 700; margin-bottom: 0px; }
-        .sub-header { font-size: 1.1rem; color: #4B5563; margin-bottom: 20px; }
-        .card-container { background-color: #F8FAFC; padding: 20px; border-radius: 10px; border: 1px solid #E2E8F0; margin-bottom: 15px; }
-        .stButton>button { width: 100%; border-radius: 6px; font-weight: 600; }
-    </style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="Gestión Financiera - Prototipo Eventos", page_icon="💰", layout="wide")
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
+# Lista oficial de integrantes para menús desplegables
 INTEGRANTES_LISTA = [
     "Ivan Santiago Valencia Villamil",
     "Nicol Vanegas Cruz",
@@ -33,118 +20,74 @@ INTEGRANTES_LISTA = [
     "Alejandro Martinez Rubio"
 ]
 
+@st.cache_data
 def load_excel_data():
-    """Carga los datos del Excel limpiando cabeceras y normalizando textos"""
-    try:
-        xls = pd.ExcelFile(EXCEL_FILE)
-        sheets = {}
-        for sheet in xls.sheet_names:
-            df_raw = pd.read_excel(xls, sheet_name=sheet, header=None)
-            
-            # Buscar la fila de encabezados reales
-            header_row = 0
-            for idx, row in df_raw.iterrows():
-                row_str = row.astype(str).str.lower().str.strip().values
-                if any('concepto' in str(val) for val in row_str) or any('valor' in str(val) for val in row_str):
-                    header_row = idx
-                    break
-            
-            df = pd.read_excel(xls, sheet_name=sheet, header=header_row)
-            # Limpiar nombres de columnas de espacios invisibles
-            df.columns = df.columns.astype(str).str.strip()
-            df = df.dropna(how='all', axis=1)
-            sheets[sheet] = df
-            
-        return sheets
-    except Exception:
-        return {}
+    xls = pd.ExcelFile(EXCEL_FILE)
+    sheets = {sheet: pd.read_excel(xls, sheet_name=sheet) for sheet in xls.sheet_names}
+    return sheets
 
 def save_excel_data(df_dict):
-    """Guarda los datos en Excel aplicando formato profesional y forzando valores numéricos limpios"""
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         for sheet_name, df in df_dict.items():
-            # Limpiar filas completamente vacías antes de guardar
-            df_clean = df.dropna(how='all')
-            df_clean.to_excel(writer, sheet_name=sheet_name, index=False)
-            
-    # Dar formato con openpyxl
-    wb = openpyxl.load_workbook(EXCEL_FILE)
-    
-    font_header = Font(name="Arial", size=11, bold=True, color="FFFFFF")
-    fill_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
-    font_body = Font(name="Arial", size=10)
-    
-    thin_border = Border(
-        left=Side(style='thin', color='D3D3D3'),
-        right=Side(style='thin', color='D3D3D3'),
-        top=Side(style='thin', color='D3D3D3'),
-        bottom=Side(style='thin', color='D3D3D3')
-    )
-    
-    for sheet_name in wb.sheetnames:
-        ws = wb[sheet_name]
-        
-        for row_idx, row in enumerate(ws.iter_rows(min_row=1, max_row=ws.max_row, min_col=1, max_col=ws.max_column), start=1):
-            for cell in row:
-                cell.border = thin_border
-                if row_idx == 1:
-                    cell.font = font_header
-                    cell.fill = fill_header
-                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-                else:
-                    cell.font = font_body
-                    cell.alignment = Alignment(horizontal="left", vertical="center")
-                    
-        # Auto-ajustar ancho de columnas
-        for col in ws.columns:
-            max_len = 0
-            col_letter = get_column_letter(col[0].column)
-            for cell in col:
-                if cell.value is not None:
-                    max_len = max(max_len, len(str(cell.value)))
-            ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
-            
-    wb.save(EXCEL_FILE)
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+    # Limpiar caché para forzar la lectura del Excel actualizado
     st.cache_data.clear()
 
-def limpiar_y_obtener_datos(df, col_concepto, col_valor):
-    """Filtra filas vacías y la fila de totales para trabajar con los registros reales y asegura valores numéricos"""
-    if df.empty or col_concepto is None:
-        return pd.DataFrame()
+# Función para generar un recibo profesional en formato PDF utilizando ReportLab
+def generar_pdf_recibo(rec_id, fecha, tipo, concepto, valor, responsable):
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=letter)
+    width, height = letter
     
-    df_temp = df.copy()
-    filtro_validos = []
+    # Encabezado y Estilo
+    c.setFillColorRGB(0.1, 0.2, 0.4)
+    c.rect(0, height - 100, width, 100, fill=1, stroke=0)
     
-    for idx, row in df_temp.iterrows():
-        concepto_val = str(row.get(col_concepto, '')).strip().lower()
-        if concepto_val != 'nan' and concepto_val != '' and 'total' not in concepto_val:
-            filtro_validos.append(idx)
-            
-    df_filtrado = df_temp.loc[filtro_validos].copy()
+    c.setFillColorRGB(1, 1, 1)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(50, height - 45, "COMPROBANTE OFICIAL DE EVENTO")
+    c.setFont("Helvetica", 12)
+    c.drawString(50, height - 70, "Sistema de Control y Gestión Financiera")
     
-    # Asegurar que la columna de valor sea estrictamente numérica para las sumatorias
-    if col_valor in df_filtrado.columns:
-        df_filtrado[col_valor] = pd.to_numeric(
-            df_filtrado[col_valor].astype(str).str.replace(r'[^0-9.]', '', regex=True), 
-            errors='coerce'
-        ).fillna(0)
-        
-    return df_filtrado
+    # Detalles del Recibo
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 12)
+    y_pos = height - 150
+    
+    c.drawString(50, y_pos, f"ID de Comprobante: {rec_id}")
+    y_pos -= 30
+    c.drawString(50, y_pos, f"Fecha de Emisión: {fecha}")
+    y_pos -= 30
+    c.drawString(50, y_pos, f"Tipo de Movimiento: {tipo}")
+    y_pos -= 30
+    c.drawString(50, y_pos, f"Concepto: {concepto}")
+    y_pos -= 30
+    c.drawString(50, y_pos, f"Valor Total: ${valor:,.0f} COP")
+    y_pos -= 30
+    c.drawString(50, y_pos, f"Responsable Emisor: {responsable}")
+    y_pos -= 30
+    c.drawString(50, y_pos, "Estado: Registrado, Verificado y Aprobado")
+    
+    # Pie de página
+    c.setStrokeColorRGB(0.7, 0.7, 0.7)
+    c.line(50, 100, width - 50, 100)
+    c.setFont("Helvetica-Oblique", 9)
+    c.setFillColorRGB(0.4, 0.4, 0.4)
+    c.drawString(50, 80, "Este documento es un comprobante digital generado automáticamente por el sistema del proyecto.")
+    
+    c.save()
+    buffer.seek(0)
+    return buffer.getvalue()
 
-# Inicializar estado de datos en session_state para permitir edición fluida
-if 'data_dict' not in st.session_state:
-    st.session_state.data_dict = load_excel_data()
-
-data_dict = st.session_state.data_dict
-
-if not data_dict:
-    st.error(f"⚠️ No se pudo cargar el archivo '{EXCEL_FILE}'. Asegúrate de que esté en el mismo directorio.")
+# Cargar datos
+try:
+    data_dict = load_excel_data()
+except Exception as e:
+    st.error(f"Error al cargar el archivo Excel: {e}")
     st.stop()
 
-# --- MENÚ LATERAL ESTILIZADO ---
-st.sidebar.markdown("### 💰 Control Financiero")
-st.sidebar.markdown("---")
-menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
+st.sidebar.title("📌 Menú de Navegación")
+menu = st.sidebar.selectbox("Selecciona una sección:", [
     "1. Inicio", 
     "2. Registro de Ingresos", 
     "3. Registro de Gastos", 
@@ -153,239 +96,307 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "6. Anexo de Recibos & QR", 
     "7. Reporte Final"
 ])
-st.sidebar.markdown("---")
-st.sidebar.info("💡 **Sistema de Gestión**\n\nDesarrollado para el control transparente de eventos y recursos.")
-
-# Identificar nombres reales de columnas en las hojas de forma dinámica
-df_ing_raw = data_dict.get('Registro de Ingresos', pd.DataFrame())
-df_gas_raw = data_dict.get('Registro de Gastos', pd.DataFrame())
-
-def encontrar_columna(df, palabras_clave):
-    for col in df.columns:
-        col_str = str(col).lower().strip()
-        if any(p in col_str for p in palabras_clave):
-            return col
-    return df.columns[0] if len(df.columns) > 0 else None
-
-col_c_ing = encontrar_columna(df_ing_raw, ['concepto', 'detalle', 'descripción'])
-col_v_ing = encontrar_columna(df_ing_raw, ['valor', 'monto', 'total'])
-
-col_c_gas = encontrar_columna(df_gas_raw, ['concepto', 'detalle', 'descripción'])
-col_v_gas = encontrar_columna(df_gas_raw, ['valor', 'monto', 'total'])
-col_cat_gas = encontrar_columna(df_gas_raw, ['categoría', 'categoria', 'tipo'])
 
 # --- 1. INICIO ---
 if menu == "1. Inicio":
-    st.markdown('<p class="main-header">🏛️ Proyecto de Control y Gestión Financiera</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Plataforma centralizada para la administración y supervisión de recursos en eventos</p>', unsafe_allow_html=True)
+    st.title("🏛️ Proyecto de Control y Gestión Financiera")
+    st.subheader("Sistema Genérico para Control de Eventos (Ingresos, Gastos y Balance)")
     st.markdown("---")
+    st.markdown("### 📋 1. Información General del Proyecto")
+    st.info("**Nombre del Proyecto:** Plantilla Estándar de Presupuesto y Balance de Eventos")
+    st.info("**Objetivo:** Registrar recaudos y gastos para calcular la ganancia o saldo final.")
+    st.info("**Versión:** v2.2 (Interactiva y Sincronizada)")
+    st.info("**Estado:** En Desarrollo / Proyecto Base")
     
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.markdown("### 🎯 Objetivo del Sistema")
-        st.write("Este software permite llevar un control riguroso, automatizado y transparente de todos los movimientos monetarios, facilitando la auditoría en tiempo real, la generación de comprobantes con códigos QR y la visualización de balances generales.")
-    with col2:
-        st.success("✅ **Estado del Sistema:** Conectado y Sincronizado con Excel.")
-
-    st.markdown("---")
-    st.markdown("### 👥 Equipo de Trabajo e Integrantes")
+    st.markdown("### 👥 2. Equipo / Integrantes")
     integrantes_data = [
         {"N.°": 1, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
         {"N.°": 2, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
         {"N.°": 3, "Nombre Completo": "Jhonatan Andrey Melo", "Rol / Responsabilidad": "Control de Gastos e Insumos"},
         {"N.°": 4, "Nombre Completo": "Alejandro Martinez Rubio", "Rol / Responsabilidad": "Soportes y Control de Balance"},
     ]
-    st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
+    st.table(pd.DataFrame(integrantes_data))
 
 # --- 2. REGISTRO DE INGRESOS ---
 elif menu == "2. Registro de Ingresos":
-    st.markdown('<p class="main-header">📈 Registro de Ingresos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Administra y edita directamente las entradas económicas del evento</p>', unsafe_allow_html=True)
+    st.title("📈 Registro de Ingresos")
+    df_ingresos = data_dict['Registro de Ingresos']
+    
+    st.markdown("### 📝 Tabla Interactiva (Modifica datos o elimina filas y guarda)")
+    
+    column_config = {}
+    if 'Responsable' in df_ingresos.columns:
+        column_config['Responsable'] = st.column_config.SelectboxColumn(
+            "Responsable",
+            options=INTEGRANTES_LISTA,
+            required=True
+        )
+
+    edited_ingresos = st.data_editor(
+        df_ingresos, 
+        use_container_width=True, 
+        num_rows="dynamic", 
+        key="editor_ingresos",
+        column_config=column_config
+    )
+    
+    if st.button("💾 Guardar cambios en la tabla de Ingresos"):
+        data_dict['Registro de Ingresos'] = edited_ingresos
+        save_excel_data(data_dict)
+        st.success("¡Cambios guardados y sincronizados correctamente!")
+        st.rerun()
+    
     st.markdown("---")
-    
-    edited_ingresos = st.data_editor(df_ing_raw, use_container_width=True, num_rows="dynamic", key="editor_ingresos_tabla")
-    
-    st.markdown("")
-    col_btn1, _ = st.columns([1, 4])
-    with col_btn1:
-        if st.button("💾 Guardar Cambios Ingresos"):
-            st.session_state.data_dict['Registro de Ingresos'] = edited_ingresos
-            save_excel_data(st.session_state.data_dict)
-            st.success("¡Ingresos guardados y formateados en Excel correctamente!")
+    st.markdown("### ➕ Agregar Nuevo Ingreso")
+    with st.form("form_ingreso"):
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha = st.date_input("Fecha")
+            concepto = st.text_input("Concepto (ej. Venta de boletas)")
+            valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
+        with col2:
+            responsable = st.selectbox("Responsable", INTEGRANTES_LISTA, index=1)
+            observaciones = st.text_area("Observaciones")
+        
+        submitted = st.form_submit_button("Guardar Ingreso")
+        if submitted:
+            nuevo_reg = pd.DataFrame({
+                'Fecha': [str(fecha)],
+                'Concepto': [concepto],
+                'Valor': [valor],
+                'Responsable': [responsable],
+                'Observaciones': [observaciones]
+            })
+            data_dict['Registro de Ingresos'] = pd.concat([df_ingresos, nuevo_reg], ignore_index=True)
+            save_excel_data(data_dict)
+            st.success("¡Ingreso agregado y guardado correctamente!")
             st.rerun()
 
 # --- 3. REGISTRO DE GASTOS ---
 elif menu == "3. Registro de Gastos":
-    st.markdown('<p class="main-header">📉 Registro de Gastos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Controla los egresos, compras e inversiones realizadas</p>', unsafe_allow_html=True)
+    st.title("📉 Registro de Gastos")
+    df_gastos = data_dict['Registro de Gastos']
+    
+    st.markdown("### 📝 Tabla Interactiva (Modifica datos o elimina filas y guarda)")
+    
+    column_config_g = {}
+    if 'Responsable' in df_gastos.columns:
+        column_config_g['Responsable'] = st.column_config.SelectboxColumn(
+            "Responsable",
+            options=INTEGRANTES_LISTA,
+            required=True
+        )
+    if 'Categoría' in df_gastos.columns:
+        column_config_g['Categoría'] = st.column_config.SelectboxColumn(
+            "Categoría",
+            options=["Logística", "Publicidad", "Alimentación", "Varios"],
+            required=True
+        )
+
+    edited_gastos = st.data_editor(
+        df_gastos, 
+        use_container_width=True, 
+        num_rows="dynamic", 
+        key="editor_gastos",
+        column_config=column_config_g
+    )
+    
+    if st.button("💾 Guardar cambios en la tabla de Gastos"):
+        data_dict['Registro de Gastos'] = edited_gastos
+        save_excel_data(data_dict)
+        st.success("¡Cambios de gastos guardados y sincronizados correctamente!")
+        st.rerun()
+        
     st.markdown("---")
-    
-    edited_gastos = st.data_editor(df_gas_raw, use_container_width=True, num_rows="dynamic", key="editor_gastos_tabla")
-    
-    st.markdown("")
-    col_btn1, _ = st.columns([1, 4])
-    with col_btn1:
-        if st.button("💾 Guardar Cambios Gastos"):
-            st.session_state.data_dict['Registro de Gastos'] = edited_gastos
-            save_excel_data(st.session_state.data_dict)
-            st.success("¡Gastos guardados y formateados en Excel correctamente!")
+    st.markdown("### ➕ Agregar Nuevo Gasto")
+    with st.form("form_gasto"):
+        col1, col2 = st.columns(2)
+        with col1:
+            fecha = st.date_input("Fecha Gasto")
+            concepto = st.text_input("Concepto (ej. Alquiler de sonido)")
+            categoria = st.selectbox("Categoría", ["Logística", "Publicidad", "Alimentación", "Varios"])
+        with col2:
+            valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
+            responsable = st.selectbox("Responsable", INTEGRANTES_LISTA, index=2)
+            observaciones = st.text_area("Observaciones")
+        
+        submitted = st.form_submit_button("Guardar Gasto")
+        if submitted:
+            nuevo_reg = pd.DataFrame({
+                'Fecha': [str(fecha)],
+                'Concepto': [concepto],
+                'Categoría': [categoria],
+                'Valor': [valor],
+                'Responsable': [responsable],
+                'Observaciones': [observaciones]
+            })
+            data_dict['Registro de Gastos'] = pd.concat([df_gastos, nuevo_reg], ignore_index=True)
+            save_excel_data(data_dict)
+            st.success("¡Gasto agregado y guardado correctamente!")
             st.rerun()
 
 # --- 4. BALANCE FINANCIERO ---
 elif menu == "4. Balance Financiero":
-    st.markdown('<p class="main-header">⚖️ Balance Financiero General</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Resumen contable actualizado de la salud financiera del proyecto</p>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.title("⚖️ Balance Financiero General")
     
-    df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
-    df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
+    df_ing = data_dict['Registro de Ingresos']
+    df_gas = data_dict['Registro de Gastos']
     
-    total_ingresos = df_ing_clean[col_v_ing].sum() if not df_ing_clean.empty and col_v_ing else 0
-    total_gastos = df_gas_clean[col_v_gas].sum() if not df_gas_clean.empty and col_v_gas else 0
+    total_ingresos = pd.to_numeric(df_ing['Valor'], errors='coerce').sum() if 'Valor' in df_ing.columns else 0
+    total_gastos = pd.to_numeric(df_gas['Valor'], errors='coerce').sum() if 'Valor' in df_gas.columns else 0
     saldo = total_ingresos - total_gastos
     
     col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric(label="💵 Total Ingresos", value=f"${total_ingresos:,.0f} COP")
-    with col2:
-        st.metric(label="💸 Total Gastos", value=f"${total_gastos:,.0f} COP")
-    with col3:
-        st.metric(label="💰 Saldo / Ganancia Neta", value=f"${saldo:,.0f} COP", delta=f"${saldo:,.0f} COP")
+    col1.metric("Total Ingresos", f"${total_ingresos:,.0f}")
+    col2.metric("Total Gastos", f"${total_gastos:,.0f}")
+    col3.metric("Saldo / Ganancia Neta", f"${saldo:,.0f}", delta=f"${saldo:,.0f}")
+    
+    st.markdown("---")
+    balance_df = pd.DataFrame({
+        "Concepto": ["Total de Ingresos", "Total de Gastos", "Saldo Final"],
+        "Valor ($)": [total_ingresos, total_gastos, saldo]
+    })
+    st.table(balance_df)
 
 # --- 5. DASHBOARD ---
 elif menu == "5. Dashboard y Gráficos":
-    st.markdown('<p class="main-header">📊 Dashboard y Resumen Visual</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Análisis gráfico del comportamiento financiero del evento</p>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.title("📊 Dashboard y Resumen Visual")
     
-    df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
-    df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
+    df_ing = data_dict['Registro de Ingresos']
+    df_gas = data_dict['Registro de Gastos']
     
-    tot_ing = df_ing_clean[col_v_ing].sum() if not df_ing_clean.empty and col_v_ing else 0
-    tot_gas = df_gas_clean[col_v_gas].sum() if not df_gas_clean.empty and col_v_gas else 0
+    total_ingresos = pd.to_numeric(df_ing['Valor'], errors='coerce').sum() if 'Valor' in df_ing.columns else 0
+    total_gastos = pd.to_numeric(df_gas['Valor'], errors='coerce').sum() if 'Valor' in df_gas.columns else 0
     
     col1, col2 = st.columns(2)
     with col1:
-        st.markdown("#### ⚖️ Comparativa Ingresos vs Gastos")
-        st.bar_chart(pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [tot_ing, tot_gas]}).set_index("Tipo"))
+        st.subheader("Comparativa Ingresos vs Gastos")
+        chart_data = pd.DataFrame({
+            "Tipo": ["Ingresos", "Gastos"],
+            "Monto": [total_ingresos, total_gastos]
+        }).set_index("Tipo")
+        st.bar_chart(chart_data)
+        
     with col2:
-        st.markdown("#### 🏷️ Gastos por Categoría")
-        if not df_gas_clean.empty and col_cat_gas and col_cat_gas in df_gas_clean.columns:
-            df_g_copy = df_gas_clean.copy()
-            df_g_copy[col_cat_gas] = df_g_copy[col_cat_gas].fillna("Sin Categoría").astype(str)
-            st.bar_chart(df_g_copy.groupby(col_cat_gas)[col_v_gas].sum())
+        st.subheader("Gastos por Categoría")
+        if 'Categoría' in df_gas.columns and 'Valor' in df_gas.columns:
+            df_gas_copy = df_gas.copy()
+            df_gas_copy['Valor'] = pd.to_numeric(df_gas_copy['Valor'], errors='coerce')
+            cat_grouped = df_gas_copy.groupby('Categoría')['Valor'].sum()
+            st.bar_chart(cat_grouped)
         else:
-            st.info("ℹ️ No se encontró una columna de categoría válida en los gastos para graficar.")
+            st.info("No hay suficientes datos de categorías.")
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
-    st.markdown('<p class="main-header">🧾 Generador de Comprobantes y Códigos QR</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Selecciona cualquier movimiento registrado para emitir su soporte oficial</p>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.title("🧾 Generador Automático de Recibos PDF y Códigos QR")
+    st.markdown("Crea un recibo oficial en formato **PDF** y su respectivo código QR estructurado para escaneo móvil.")
     
-    df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
-    df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
+    df_anexo = data_dict['Anexo de recibos']
+    st.dataframe(df_anexo, use_container_width=True)
     
-    opciones = []
+    st.markdown("### ➕ Crear Recibo en PDF y QR")
     
-    if not df_ing_clean.empty:
-        col_f_ing = df_ing_raw.columns[0]
-        for _, r in df_ing_clean.iterrows():
-            fec = r.get(col_f_ing, '')
-            con = r.get(col_c_ing, '')
-            val = r.get(col_v_ing, 0)
-            opciones.append(f"[INGRESO] {fec} - {con} (${val:,.0f})")
-                
-    if not df_gas_clean.empty:
-        col_f_gas = df_gas_raw.columns[0]
-        for _, r in df_gas_clean.iterrows():
-            fec = r.get(col_f_gas, '')
-            con = r.get(col_c_gas, '')
-            val = r.get(col_v_gas, 0)
-            opciones.append(f"[GASTO] {fec} - {con} (${val:,.0f})")
+    if 'ultimo_pdf_bytes' not in st.session_state:
+        st.session_state.ultimo_pdf_bytes = None
+    if 'ultimo_recibo_id' not in st.session_state:
+        st.session_state.ultimo_recibo_id = None
+    if 'ultimo_qr_img' not in st.session_state:
+        st.session_state.ultimo_qr_img = None
 
-    if not opciones:
-        st.warning("⚠️ No se encontraron registros válidos en las tablas para generar comprobantes.")
-    else:
-        col_sel1, col_sel2 = st.columns([3, 1])
-        with col_sel1:
-            mov_sel = st.selectbox("🔍 Selecciona el movimiento:", opciones)
-        with col_sel2:
-            st.markdown("<br>", unsafe_allow_html=True)
-            generar_btn = st.button("🚀 Generar Comprobante")
-        
-        if generar_btn:
-            is_ingreso = "[INGRESO]" in mov_sel
-            rec_id = f"REC-{abs(hash(mov_sel)) % 10000:04d}"
+    with st.form("form_qr_auto"):
+        col1, col2 = st.columns(2)
+        with col1:
+            rec_id = st.text_input("ID Recibo", value=f"REC-00{len(df_anexo)+1}")
+            fecha = st.date_input("Fecha")
+            tipo = st.selectbox("Tipo de Movimiento", ["Ingreso", "Gasto"])
+            concepto = st.text_input("Concepto (ej. Pago de sonido / Venta boleta)")
+        with col2:
+            valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
+            responsable = st.selectbox("Responsable que emite", INTEGRANTES_LISTA)
             
-            df_origen = df_ing_clean if is_ingreso else df_gas_clean
-            col_con_activo = col_c_ing if is_ingreso else col_c_gas
-            col_val_activo = col_v_ing if is_ingreso else col_v_gas
-            col_fec_activo = df_ing_raw.columns[0] if is_ingreso else df_gas_raw.columns[0]
+        submitted = st.form_submit_button("Generar Recibo PDF y QR")
+        if submitted:
+            # Generar el PDF real
+            pdf_bytes = generar_pdf_recibo(rec_id, str(fecha), tipo, concepto, valor, responsable)
             
-            fila = df_origen[df_origen[col_con_activo].astype(str).apply(lambda x: x in mov_sel)]
+            # Formato optimizado para el QR (Estructura clara de datos del comprobante)
+            texto_qr = f"COMPROBANTE_ID:{rec_id}|TIPO:{tipo}|CONCEPTO:{concepto}|VALOR:${valor:,.0f}COP|RESPONSABLE:{responsable}|ESTADO:VERIFICADO"
             
-            if not fila.empty:
-                f_data = fila.iloc[0]
-                fecha = f_data.get(col_fec_activo, 'N/A')
-                concepto = f_data.get(col_con_activo, 'N/A')
-                valor = f_data.get(col_val_activo, 0)
-                
-                texto_recibo = (
-                    f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
-                    f"ID: {rec_id}\n"
-                    f"Tipo: {'Ingreso' if is_ingreso else 'Gasto'}\n"
-                    f"Fecha: {fecha}\n"
-                    f"Concepto: {concepto}\n"
-                    f"Valor: ${valor:,.0f} COP\n"
-                    f"Estado: Verificado y Aprobado"
-                )
-                
-                texto_qr = f"ID:{rec_id}|VALOR:${valor:,.0f}COP|CONCEPTO:{concepto}"
-                
-                qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
-                qr.add_data(texto_qr)
-                qr.make(fit=True)
-                img = qr.make_image(fill_color="black", back_color="white")
-                
-                buf = BytesIO()
-                img.save(buf, format="PNG")
-                
-                st.session_state.ultimo_recibo_texto = texto_recibo
-                st.session_state.ultimo_recibo_id = rec_id
-                st.session_state.ultimo_qr_img = buf.getvalue()
-                st.success("¡Comprobante y Código QR generados con éxito!")
+            # Configuración del QR
+            qr = qrcode.QRCode(
+                version=None,
+                error_correction=qrcode.constants.ERROR_CORRECT_M,
+                box_size=8,
+                border=2,
+            )
+            qr.add_data(texto_qr)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            buf_qr = BytesIO()
+            img.save(buf_qr, format="PNG")
+            
+            nuevo_anexo = pd.DataFrame({
+                'ID': [rec_id],
+                'Fecha': [str(fecha)],
+                'Tipo (Ingreso/Gasto)': [tipo],
+                'Concepto': [concepto],
+                'Valor': [valor],
+                'Nombre del archivo o enlace': [f"Recibo_PDF_{rec_id}.pdf"],
+                'Código QR': [f"QR Oficial - {concepto}"]
+            })
+            data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
+            save_excel_data(data_dict)
+            
+            # Guardar en session state
+            st.session_state.ultimo_pdf_bytes = pdf_bytes
+            st.session_state.ultimo_recibo_id = rec_id
+            st.session_state.ultimo_qr_img = buf_qr.getvalue()
+            
+            st.success("¡Recibo PDF y Código QR generados con éxito!")
 
-    if 'ultimo_recibo_texto' in st.session_state and st.session_state.ultimo_recibo_texto is not None:
+    # Vista previa y botones de descarga seguros fuera del formulario
+    if st.session_state.ultimo_pdf_bytes is not None:
         st.markdown("---")
-        st.markdown(f"#### 📄 Vista Previa del Comprobante: `{st.session_state.ultimo_recibo_id}`")
+        st.subheader(f"📄 Comprobante Generado: {st.session_state.ultimo_recibo_id}")
         
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.text_area("Detalles del Comprobante", st.session_state.ultimo_recibo_texto, height=180)
-            st.download_button("📥 Descargar Comprobante (.txt)", st.session_state.ultimo_recibo_texto, file_name=f"{st.session_state.ultimo_recibo_id}.txt")
-        with c2:
-            st.image(st.session_state.ultimo_qr_img, caption="Código QR Oficial", width=180)
+        col_prev1, col_prev2 = st.columns(2)
+        with col_prev1:
+            st.image(st.session_state.ultimo_qr_img, caption=f"Código QR Oficial - {st.session_state.ultimo_recibo_id}", width=200)
+        with col_prev2:
+            st.info("El código QR codifica toda la información oficial del comprobante financiero.")
+            st.download_button(
+                label="📥 Descargar Comprobante en formato PDF",
+                data=st.session_state.ultimo_pdf_bytes,
+                file_name=f"{st.session_state.ultimo_recibo_id}_comprobante.pdf",
+                mime="application/pdf"
+            )
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
-    st.markdown('<p class="main-header">📑 Reporte Final del Evento</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Consolidado general y opción de descarga del archivo completo</p>', unsafe_allow_html=True)
-    st.markdown("---")
+    st.title("📑 Reporte Final del Evento")
     
-    df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
-    df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
+    df_ing = data_dict['Registro de Ingresos']
+    df_gas = data_dict['Registro de Gastos']
     
-    tot_ing = df_ing_clean[col_v_ing].sum() if not df_ing_clean.empty and col_v_ing else 0
-    tot_gas = df_gas_clean[col_v_gas].sum() if not df_gas_clean.empty and col_v_gas else 0
-    saldo = tot_ing - tot_gas
+    total_ingresos = pd.to_numeric(df_ing['Valor'], errors='coerce').sum() if 'Valor' in df_ing.columns else 0
+    total_gastos = pd.to_numeric(df_gas['Valor'], errors='coerce').sum() if 'Valor' in df_gas.columns else 0
+    saldo = total_ingresos - total_gastos
     
-    col_rep1, col_rep2, col_rep3 = st.columns(3)
-    col_rep1.metric("Total Recaudado", f"${tot_ing:,.0f} COP")
-    col_rep2.metric("Total Gastado", f"${tot_gas:,.0f} COP")
-    col_rep3.metric("Ganancia Neta", f"${saldo:,.0f} COP", delta=f"${saldo:,.0f} COP")
+    st.markdown("### Resumen Ejecutivo")
+    st.write(f"- **Total Recaudado:** ${total_ingresos:,.0f} COP")
+    st.write(f"- **Total Invertido/Gastado:** ${total_gastos:,.0f} COP")
+    st.write(f"- **Ganancia Neta Obtenida:** ${saldo:,.0f} COP")
     
-    st.markdown("---")
-    st.markdown("### 📥 Descargar Documento Excel Actualizado")
+    st.markdown("### 💡 Evaluación de la Gestión")
+    st.success("El proyecto se ejecutó exitosamente cumpliendo con los registros financieros y soportes digitales correspondientes.")
+    
+    st.markdown("### 📥 Descargar Archivo Excel Actualizado")
     with open(EXCEL_FILE, "rb") as f:
-        st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button(
+            label="Descargar Excel Completo",
+            data=f,
+            file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
