@@ -27,6 +27,8 @@ def save_excel_data(df_dict):
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         for sheet_name, df in df_dict.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
+    # Limpiar caché para forzar la lectura del Excel actualizado
+    st.cache_data.clear()
 
 # Cargar datos
 try:
@@ -54,10 +56,10 @@ if menu == "1. Inicio":
     st.markdown("### 📋 1. Información General del Proyecto")
     st.info("**Nombre del Proyecto:** Plantilla Estándar de Presupuesto y Balance de Eventos")
     st.info("**Objetivo:** Registrar recaudos y gastos para calcular la ganancia o saldo final.")
-    st.info("**Versión:** v2.1 (Aplicación Interactiva Mejorada)")
+    st.info("**Versión:** v2.2 (Interactiva y Sincronizada)")
     st.info("**Estado:** En Desarrollo / Proyecto Base")
     
-    st.markdown("### 👥 2. Equipo de Trabajo / Integrantes")
+    st.markdown("### 👥 2. Equipo / Integrantes")
     integrantes_data = [
         {"N.°": 1, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
         {"N.°": 2, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
@@ -71,16 +73,29 @@ elif menu == "2. Registro de Ingresos":
     st.title("📈 Registro de Ingresos")
     df_ingresos = data_dict['Registro de Ingresos']
     
-    # Limpiar filas nulas si las hay
-    df_ingresos = df_ingresos.dropna(subset=['Fecha']) if 'Fecha' in df_ingresos.columns else df_ingresos
+    st.markdown("### 📝 Tabla Interactiva (Modifica datos o elimina filas y guarda)")
     
-    st.markdown("### 📝 Tabla Interactiva (Puedes editar celdas o borrar filas directamente)")
-    edited_ingresos = st.data_editor(df_ingresos, use_container_width=True, num_rows="dynamic", key="editor_ingresos")
+    # Configurar columna de responsable con opciones desplegables si existe la columna
+    column_config = {}
+    if 'Responsable' in df_ingresos.columns:
+        column_config['Responsable'] = st.column_config.SelectboxColumn(
+            "Responsable",
+            options=INTEGRANTES_LISTA,
+            required=True
+        )
+
+    edited_ingresos = st.data_editor(
+        df_ingresos, 
+        use_container_width=True, 
+        num_rows="dynamic", 
+        key="editor_ingresos",
+        column_config=column_config
+    )
     
-    if st.button("💾 Guardar cambios de la tabla"):
+    if st.button("💾 Guardar cambios en la tabla de Ingresos"):
         data_dict['Registro de Ingresos'] = edited_ingresos
         save_excel_data(data_dict)
-        st.success("¡Cambios guardados correctamente en el Excel!")
+        st.success("¡Cambios guardados y sincronizados correctamente!")
         st.rerun()
     
     st.markdown("---")
@@ -106,22 +121,42 @@ elif menu == "2. Registro de Ingresos":
             })
             data_dict['Registro de Ingresos'] = pd.concat([df_ingresos, nuevo_reg], ignore_index=True)
             save_excel_data(data_dict)
-            st.success("¡Ingreso agregado y guardado en el Excel correctamente!")
+            st.success("¡Ingreso agregado y guardado correctamente!")
             st.rerun()
 
 # --- 3. REGISTRO DE GASTOS ---
 elif menu == "3. Registro de Gastos":
     st.title("📉 Registro de Gastos")
     df_gastos = data_dict['Registro de Gastos']
-    df_gastos = df_gastos.dropna(subset=['Fecha']) if 'Fecha' in df_gastos.columns else df_gastos
     
-    st.markdown("### 📝 Tabla Interactiva (Puedes editar celdas o borrar filas directamente)")
-    edited_gastos = st.data_editor(df_gastos, use_container_width=True, num_rows="dynamic", key="editor_gastos")
+    st.markdown("### 📝 Tabla Interactiva (Modifica datos o elimina filas y guarda)")
     
-    if st.button("💾 Guardar cambios de la tabla de gastos"):
+    column_config_g = {}
+    if 'Responsable' in df_gastos.columns:
+        column_config_g['Responsable'] = st.column_config.SelectboxColumn(
+            "Responsable",
+            options=INTEGRANTES_LISTA,
+            required=True
+        )
+    if 'Categoría' in df_gastos.columns:
+        column_config_g['Categoría'] = st.column_config.SelectboxColumn(
+            "Categoría",
+            options=["Logística", "Publicidad", "Alimentación", "Varios"],
+            required=True
+        )
+
+    edited_gastos = st.data_editor(
+        df_gastos, 
+        use_container_width=True, 
+        num_rows="dynamic", 
+        key="editor_gastos",
+        column_config=column_config_g
+    )
+    
+    if st.button("💾 Guardar cambios en la tabla de Gastos"):
         data_dict['Registro de Gastos'] = edited_gastos
         save_excel_data(data_dict)
-        st.success("¡Cambios de gastos guardados correctamente en el Excel!")
+        st.success("¡Cambios de gastos guardados y sincronizados correctamente!")
         st.rerun()
         
     st.markdown("---")
@@ -149,7 +184,7 @@ elif menu == "3. Registro de Gastos":
             })
             data_dict['Registro de Gastos'] = pd.concat([df_gastos, nuevo_reg], ignore_index=True)
             save_excel_data(data_dict)
-            st.success("¡Gasto agregado y guardado en el Excel correctamente!")
+            st.success("¡Gasto agregado y guardado correctamente!")
             st.rerun()
 
 # --- 4. BALANCE FINANCIERO ---
@@ -197,8 +232,9 @@ elif menu == "5. Dashboard y Gráficos":
     with col2:
         st.subheader("Gastos por Categoría")
         if 'Categoría' in df_gas.columns and 'Valor' in df_gas.columns:
-            df_gas['Valor'] = pd.to_numeric(df_gas['Valor'], errors='coerce')
-            cat_grouped = df_gas.groupby('Categoría')['Valor'].sum()
+            df_gas_copy = df_gas.copy()
+            df_gas_copy['Valor'] = pd.to_numeric(df_gas_copy['Valor'], errors='coerce')
+            cat_grouped = df_gas_copy.groupby('Categoría')['Valor'].sum()
             st.bar_chart(cat_grouped)
         else:
             st.info("No hay suficientes datos de categorías.")
@@ -220,10 +256,11 @@ elif menu == "6. Anexo de Recibos & QR":
             concepto = st.text_input("Concepto del Recibo")
         with col2:
             valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
-            enlace = st.text_input("Enlace del Comprobante (Drive, ImgBB, URL)", value="https://drive.google.com/...")
+            enlace = st.text_input("Enlace del Comprobante (URL real o Drive)", value="https://")
             
-        submitted = st.form_submit_button("Generar QR y Guardar en Anexo")
+        submitted = st.form_submit_button("Generar QR Real y Guardar")
         if submitted:
+            # Crear QR apuntando directamente al enlace real proporcionado
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
             qr.add_data(enlace)
             qr.make(fit=True)
@@ -239,13 +276,13 @@ elif menu == "6. Anexo de Recibos & QR":
                 'Concepto': [concepto],
                 'Valor': [valor],
                 'Nombre del archivo o enlace': [enlace],
-                'Código QR': [f"[QR Generado para {enlace}]"]
+                'Código QR': [f"QR Funcional para: {enlace}"]
             })
             data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
             save_excel_data(data_dict)
             
-            st.success("¡Recibo registrado con éxito y QR generado!")
-            st.image(buf.getvalue(), caption=f"Código QR para {rec_id} - {concepto}", width=200)
+            st.success("¡Recibo registrado y código QR funcional generado!")
+            st.image(buf.getvalue(), caption=f"Escanea para abrir: {enlace}", width=200)
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
@@ -269,8 +306,8 @@ elif menu == "7. Reporte Final":
     st.markdown("### 📥 Descargar Archivo Excel Actualizado")
     with open(EXCEL_FILE, "rb") as f:
         st.download_button(
-            label="Descargar Excel Completo con Nuevos Registros",
+            label="Descargar Excel Completo",
             data=f,
-            file_name="Proyecto_Financiero_Eventos_Actualizado (1).xlsx",
+            file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx (1)",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
