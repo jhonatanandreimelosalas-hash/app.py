@@ -34,24 +34,24 @@ INTEGRANTES_LISTA = [
 ]
 
 def load_excel_data():
-    """Carga los datos del Excel limpiando y normalizando los encabezados para que sean editables"""
+    """Carga los datos del Excel limpiando cabeceras y normalizando textos"""
     try:
         xls = pd.ExcelFile(EXCEL_FILE)
         sheets = {}
         for sheet in xls.sheet_names:
             df_raw = pd.read_excel(xls, sheet_name=sheet, header=None)
             
-            # Buscar la fila que contenga los encabezados reales (ej. 'Concepto' o 'Valor')
+            # Buscar la fila de encabezados reales
             header_row = 0
             for idx, row in df_raw.iterrows():
-                row_str = row.astype(str).str.lower().values
+                row_str = row.astype(str).str.lower().str.strip().values
                 if any('concepto' in str(val) for val in row_str) or any('valor' in str(val) for val in row_str):
                     header_row = idx
                     break
             
-            # Recargar el DataFrame usando la fila correcta como cabecera
             df = pd.read_excel(xls, sheet_name=sheet, header=header_row)
-            # Eliminar columnas totalmente vacías si las hay
+            # Limpiar nombres de columnas de espacios invisibles
+            df.columns = df.columns.astype(str).str.strip()
             df = df.dropna(how='all', axis=1)
             sheets[sheet] = df
             
@@ -60,16 +60,18 @@ def load_excel_data():
         return {}
 
 def save_excel_data(df_dict):
-    """Guarda los datos en Excel aplicando formato profesional celda por celda (bordes, colores, alineación)"""
+    """Guarda los datos en Excel aplicando formato profesional y forzando valores numéricos limpios"""
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         for sheet_name, df in df_dict.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
+            # Limpiar filas completamente vacías antes de guardar
+            df_clean = df.dropna(how='all')
+            df_clean.to_excel(writer, sheet_name=sheet_name, index=False)
             
     # Dar formato con openpyxl
     wb = openpyxl.load_workbook(EXCEL_FILE)
     
     font_header = Font(name="Arial", size=11, bold=True, color="FFFFFF")
-    fill_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid") # Azul institucional
+    fill_header = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
     font_body = Font(name="Arial", size=10)
     
     thin_border = Border(
@@ -98,7 +100,7 @@ def save_excel_data(df_dict):
             max_len = 0
             col_letter = get_column_letter(col[0].column)
             for cell in col:
-                if cell.value:
+                if cell.value is not None:
                     max_len = max(max_len, len(str(cell.value)))
             ws.column_dimensions[col_letter].width = max(max_len + 4, 12)
             
@@ -106,18 +108,28 @@ def save_excel_data(df_dict):
     st.cache_data.clear()
 
 def limpiar_y_obtener_datos(df, col_concepto, col_valor):
-    """Filtra filas vacías y la fila de totales para trabajar solo con los registros reales"""
-    if df.empty:
+    """Filtra filas vacías y la fila de totales para trabajar con los registros reales y asegura valores numéricos"""
+    if df.empty or col_concepto is None:
         return pd.DataFrame()
     
     df_temp = df.copy()
     filtro_validos = []
+    
     for idx, row in df_temp.iterrows():
         concepto_val = str(row.get(col_concepto, '')).strip().lower()
         if concepto_val != 'nan' and concepto_val != '' and 'total' not in concepto_val:
             filtro_validos.append(idx)
             
-    return df_temp.loc[filtro_validos]
+    df_filtrado = df_temp.loc[filtro_validos].copy()
+    
+    # Asegurar que la columna de valor sea estrictamente numérica para las sumatorias
+    if col_valor in df_filtrado.columns:
+        df_filtrado[col_valor] = pd.to_numeric(
+            df_filtrado[col_valor].astype(str).str.replace(r'[^0-9.]', '', regex=True), 
+            errors='coerce'
+        ).fillna(0)
+        
+    return df_filtrado
 
 # Inicializar estado de datos en session_state para permitir edición fluida
 if 'data_dict' not in st.session_state:
@@ -150,7 +162,7 @@ df_gas_raw = data_dict.get('Registro de Gastos', pd.DataFrame())
 
 def encontrar_columna(df, palabras_clave):
     for col in df.columns:
-        col_str = str(col).lower()
+        col_str = str(col).lower().strip()
         if any(p in col_str for p in palabras_clave):
             return col
     return df.columns[0] if len(df.columns) > 0 else None
@@ -160,6 +172,7 @@ col_v_ing = encontrar_columna(df_ing_raw, ['valor', 'monto', 'total'])
 
 col_c_gas = encontrar_columna(df_gas_raw, ['concepto', 'detalle', 'descripción'])
 col_v_gas = encontrar_columna(df_gas_raw, ['valor', 'monto', 'total'])
+col_cat_gas = encontrar_columna(df_gas_raw, ['categoría', 'categoria', 'tipo'])
 
 # --- 1. INICIO ---
 if menu == "1. Inicio":
@@ -227,8 +240,8 @@ elif menu == "4. Balance Financiero":
     df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
     df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
     
-    total_ingresos = pd.to_numeric(df_ing_clean[col_v_ing], errors='coerce').sum() if not df_ing_clean.empty else 0
-    total_gastos = pd.to_numeric(df_gas_clean[col_v_gas], errors='coerce').sum() if not df_gas_clean.empty else 0
+    total_ingresos = df_ing_clean[col_v_ing].sum() if not df_ing_clean.empty and col_v_ing else 0
+    total_gastos = df_gas_clean[col_v_gas].sum() if not df_gas_clean.empty and col_v_gas else 0
     saldo = total_ingresos - total_gastos
     
     col1, col2, col3 = st.columns(3)
@@ -248,8 +261,8 @@ elif menu == "5. Dashboard y Gráficos":
     df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
     df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
     
-    tot_ing = pd.to_numeric(df_ing_clean[col_v_ing], errors='coerce').sum() if not df_ing_clean.empty else 0
-    tot_gas = pd.to_numeric(df_gas_clean[col_v_gas], errors='coerce').sum() if not df_gas_clean.empty else 0
+    tot_ing = df_ing_clean[col_v_ing].sum() if not df_ing_clean.empty and col_v_ing else 0
+    tot_gas = df_gas_clean[col_v_gas].sum() if not df_gas_clean.empty and col_v_gas else 0
     
     col1, col2 = st.columns(2)
     with col1:
@@ -257,13 +270,12 @@ elif menu == "5. Dashboard y Gráficos":
         st.bar_chart(pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [tot_ing, tot_gas]}).set_index("Tipo"))
     with col2:
         st.markdown("#### 🏷️ Gastos por Categoría")
-        col_cat_gas = encontrar_columna(df_gas_clean, ['categoría', 'categoria', 'tipo'])
-        if not df_gas_clean.empty and col_cat_gas in df_gas_clean.columns:
+        if not df_gas_clean.empty and col_cat_gas and col_cat_gas in df_gas_clean.columns:
             df_g_copy = df_gas_clean.copy()
-            df_g_copy[col_v_gas] = pd.to_numeric(df_g_copy[col_v_gas], errors='coerce')
+            df_g_copy[col_cat_gas] = df_g_copy[col_cat_gas].fillna("Sin Categoría").astype(str)
             st.bar_chart(df_g_copy.groupby(col_cat_gas)[col_v_gas].sum())
         else:
-            st.info("ℹ️ No hay suficientes datos de gastos para graficar por categoría.")
+            st.info("ℹ️ No se encontró una columna de categoría válida en los gastos para graficar.")
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
@@ -281,7 +293,7 @@ elif menu == "6. Anexo de Recibos & QR":
         for _, r in df_ing_clean.iterrows():
             fec = r.get(col_f_ing, '')
             con = r.get(col_c_ing, '')
-            val = pd.to_numeric(r.get(col_v_ing, 0), errors='coerce')
+            val = r.get(col_v_ing, 0)
             opciones.append(f"[INGRESO] {fec} - {con} (${val:,.0f})")
                 
     if not df_gas_clean.empty:
@@ -289,7 +301,7 @@ elif menu == "6. Anexo de Recibos & QR":
         for _, r in df_gas_clean.iterrows():
             fec = r.get(col_f_gas, '')
             con = r.get(col_c_gas, '')
-            val = pd.to_numeric(r.get(col_v_gas, 0), errors='coerce')
+            val = r.get(col_v_gas, 0)
             opciones.append(f"[GASTO] {fec} - {con} (${val:,.0f})")
 
     if not opciones:
@@ -317,7 +329,7 @@ elif menu == "6. Anexo de Recibos & QR":
                 f_data = fila.iloc[0]
                 fecha = f_data.get(col_fec_activo, 'N/A')
                 concepto = f_data.get(col_con_activo, 'N/A')
-                valor = pd.to_numeric(f_data.get(col_val_activo, 0), errors='coerce')
+                valor = f_data.get(col_val_activo, 0)
                 
                 texto_recibo = (
                     f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
@@ -364,8 +376,8 @@ elif menu == "7. Reporte Final":
     df_ing_clean = limpiar_y_obtener_datos(df_ing_raw, col_c_ing, col_v_ing)
     df_gas_clean = limpiar_y_obtener_datos(df_gas_raw, col_c_gas, col_v_gas)
     
-    tot_ing = pd.to_numeric(df_ing_clean[col_v_ing], errors='coerce').sum() if not df_ing_clean.empty else 0
-    tot_gas = pd.to_numeric(df_gas_clean[col_v_gas], errors='coerce').sum() if not df_gas_clean.empty else 0
+    tot_ing = df_ing_clean[col_v_ing].sum() if not df_ing_clean.empty and col_v_ing else 0
+    tot_gas = df_gas_clean[col_v_gas].sum() if not df_gas_clean.empty and col_v_gas else 0
     saldo = tot_ing - tot_gas
     
     col_rep1, col_rep2, col_rep3 = st.columns(3)
