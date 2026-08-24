@@ -7,7 +7,7 @@ from PIL import Image
 
 st.set_page_config(page_title="Gestión Financiera - Prototipo Eventos", page_icon="💰", layout="wide")
 
-EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado.xlsx"
+EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
 @st.cache_data
 def load_excel_data():
