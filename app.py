@@ -4,15 +4,11 @@ import openpyxl
 import qrcode
 from io import BytesIO
 from PIL import Image
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from pdf2image import convert_from_bytes
 
 st.set_page_config(page_title="Gestión Financiera - Prototipo Eventos", page_icon="💰", layout="wide")
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
-# Lista oficial de integrantes para menús desplegables
 INTEGRANTES_LISTA = [
     "Ivan Santiago Valencia Villamil",
     "Nicol Vanegas Cruz",
@@ -30,56 +26,8 @@ def save_excel_data(df_dict):
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         for sheet_name, df in df_dict.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
-    # Limpiar caché para forzar la lectura del Excel actualizado
     st.cache_data.clear()
 
-# Función para generar un recibo profesional en formato PDF utilizando ReportLab
-def generar_pdf_recibo(rec_id, fecha, tipo, concepto, valor, responsable):
-    buffer = BytesIO()
-    c = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-    
-    # Encabezado y Estilo
-    c.setFillColorRGB(0.1, 0.2, 0.4)
-    c.rect(0, height - 100, width, 100, fill=1, stroke=0)
-    
-    c.setFillColorRGB(1, 1, 1)
-    c.setFont("Helvetica-Bold", 20)
-    c.drawString(50, height - 45, "COMPROBANTE OFICIAL DE EVENTO")
-    c.setFont("Helvetica", 12)
-    c.drawString(50, height - 70, "Sistema de Control y Gestión Financiera")
-    
-    # Detalles del Recibo
-    c.setFillColorRGB(0, 0, 0)
-    c.setFont("Helvetica-Bold", 12)
-    y_pos = height - 150
-    
-    c.drawString(50, y_pos, f"ID de Comprobante: {rec_id}")
-    y_pos -= 30
-    c.drawString(50, y_pos, f"Fecha de Emisión: {fecha}")
-    y_pos -= 30
-    c.drawString(50, y_pos, f"Tipo de Movimiento: {tipo}")
-    y_pos -= 30
-    c.drawString(50, y_pos, f"Concepto: {concepto}")
-    y_pos -= 30
-    c.drawString(50, y_pos, f"Valor Total: ${valor:,.0f} COP")
-    y_pos -= 30
-    c.drawString(50, y_pos, f"Responsable Emisor: {responsable}")
-    y_pos -= 30
-    c.drawString(50, y_pos, "Estado: Registrado, Verificado y Aprobado")
-    
-    # Pie de página
-    c.setStrokeColorRGB(0.7, 0.7, 0.7)
-    c.line(50, 100, width - 50, 100)
-    c.setFont("Helvetica-Oblique", 9)
-    c.setFillColorRGB(0.4, 0.4, 0.4)
-    c.drawString(50, 80, "Este documento es un comprobante digital generado automáticamente por el sistema del proyecto.")
-    
-    c.save()
-    buffer.seek(0)
-    return buffer.getvalue()
-
-# Cargar datos
 try:
     data_dict = load_excel_data()
 except Exception as e:
@@ -289,16 +237,16 @@ elif menu == "5. Dashboard y Gráficos":
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
-    st.title("🧾 Generador Automático de Recibos PDF y Códigos QR")
-    st.markdown("Crea un recibo oficial en formato **PDF** y su respectivo código QR estructurado para escaneo móvil.")
+    st.title("🧾 Generador Automático de Recibos y Códigos QR")
+    st.markdown("Crea un recibo oficial en formato de texto estructurado y su respectivo código QR listo para escaneo rápido.")
     
     df_anexo = data_dict['Anexo de recibos']
     st.dataframe(df_anexo, use_container_width=True)
     
-    st.markdown("### ➕ Crear Recibo en PDF y QR")
+    st.markdown("### ➕ Crear Comprobante y QR")
     
-    if 'ultimo_pdf_bytes' not in st.session_state:
-        st.session_state.ultimo_pdf_bytes = None
+    if 'ultimo_recibo_texto' not in st.session_state:
+        st.session_state.ultimo_recibo_texto = None
     if 'ultimo_recibo_id' not in st.session_state:
         st.session_state.ultimo_recibo_id = None
     if 'ultimo_qr_img' not in st.session_state:
@@ -315,15 +263,22 @@ elif menu == "6. Anexo de Recibos & QR":
             valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
             responsable = st.selectbox("Responsable que emite", INTEGRANTES_LISTA)
             
-        submitted = st.form_submit_button("Generar Recibo PDF y QR")
+        submitted = st.form_submit_button("Generar Comprobante y QR")
         if submitted:
-            # Generar el PDF real
-            pdf_bytes = generar_pdf_recibo(rec_id, str(fecha), tipo, concepto, valor, responsable)
+            texto_recibo = (
+                f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
+                f"ID: {rec_id}\n"
+                f"Fecha: {fecha}\n"
+                f"Tipo: {tipo}\n"
+                f"Concepto: {concepto}\n"
+                f"Valor: ${valor:,.0f} COP\n"
+                f"Responsable: {responsable}\n"
+                f"Estado: Registrado y Verificado"
+            )
             
-            # Formato optimizado para el QR (Estructura clara de datos del comprobante)
-            texto_qr = f"COMPROBANTE_ID:{rec_id}|TIPO:{tipo}|CONCEPTO:{concepto}|VALOR:${valor:,.0f}COP|RESPONSABLE:{responsable}|ESTADO:VERIFICADO"
+            # QR estructurado profesionalmente para lectura móvil
+            texto_qr = f"ID:{rec_id}|TIPO:{tipo}|CONCEPTO:{concepto}|VALOR:${valor:,.0f}COP|RESP:{responsable}|ESTADO:OK"
             
-            # Configuración del QR
             qr = qrcode.QRCode(
                 version=None,
                 error_correction=qrcode.constants.ERROR_CORRECT_M,
@@ -334,8 +289,8 @@ elif menu == "6. Anexo de Recibos & QR":
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
             
-            buf_qr = BytesIO()
-            img.save(buf_qr, format="PNG")
+            buf = BytesIO()
+            img.save(buf, format="PNG")
             
             nuevo_anexo = pd.DataFrame({
                 'ID': [rec_id],
@@ -343,35 +298,33 @@ elif menu == "6. Anexo de Recibos & QR":
                 'Tipo (Ingreso/Gasto)': [tipo],
                 'Concepto': [concepto],
                 'Valor': [valor],
-                'Nombre del archivo o enlace': [f"Recibo_PDF_{rec_id}.pdf"],
+                'Nombre del archivo o enlace': [f"Comprobante_{rec_id}.txt"],
                 'Código QR': [f"QR Oficial - {concepto}"]
             })
             data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
             save_excel_data(data_dict)
             
-            # Guardar en session state
-            st.session_state.ultimo_pdf_bytes = pdf_bytes
+            st.session_state.ultimo_recibo_texto = texto_recibo
             st.session_state.ultimo_recibo_id = rec_id
-            st.session_state.ultimo_qr_img = buf_qr.getvalue()
+            st.session_state.ultimo_qr_img = buf.getvalue()
             
-            st.success("¡Recibo PDF y Código QR generados con éxito!")
+            st.success("¡Comprobante y QR generado con éxito!")
 
-    # Vista previa y botones de descarga seguros fuera del formulario
-    if st.session_state.ultimo_pdf_bytes is not None:
+    if st.session_state.ultimo_recibo_texto is not None:
         st.markdown("---")
-        st.subheader(f"📄 Comprobante Generado: {st.session_state.ultimo_recibo_id}")
+        st.subheader(f"📄 Vista Previa del Comprobante: {st.session_state.ultimo_recibo_id}")
+        col_v1, col_v2 = st.columns(2)
+        with col_v1:
+            st.text(st.session_state.ultimo_recibo_texto)
+        with col_v2:
+            st.image(st.session_state.ultimo_qr_img, caption=f"Código QR Oficial - {st.session_state.ultimo_recibo_id}", width=180)
         
-        col_prev1, col_prev2 = st.columns(2)
-        with col_prev1:
-            st.image(st.session_state.ultimo_qr_img, caption=f"Código QR Oficial - {st.session_state.ultimo_recibo_id}", width=200)
-        with col_prev2:
-            st.info("El código QR codifica toda la información oficial del comprobante financiero.")
-            st.download_button(
-                label="📥 Descargar Comprobante en formato PDF",
-                data=st.session_state.ultimo_pdf_bytes,
-                file_name=f"{st.session_state.ultimo_recibo_id}_comprobante.pdf",
-                mime="application/pdf"
-            )
+        st.download_button(
+            label="📥 Descargar Comprobante (.txt)",
+            data=st.session_state.ultimo_recibo_texto,
+            file_name=f"{st.session_state.ultimo_recibo_id}_comprobante.txt",
+            mime="text/plain"
+        )
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
