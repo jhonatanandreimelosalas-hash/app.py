@@ -3,7 +3,6 @@ import pandas as pd
 import openpyxl
 import qrcode
 from io import BytesIO
-from PIL import Image
 
 st.set_page_config(page_title="Gestión Financiera - Prototipo Eventos", page_icon="💰", layout="wide")
 
@@ -54,7 +53,6 @@ if menu == "1. Inicio":
     st.info("**Nombre del Proyecto:** Plantilla Estándar de Presupuesto y Balance de Eventos")
     st.info("**Objetivo:** Registrar recaudos y gastos para calcular la ganancia o saldo final.")
     st.info("**Versión:** v2.2 (Interactiva y Sincronizada)")
-    st.info("**Estado:** En Desarrollo / Proyecto Base")
     
     st.markdown("### 👥 2. Equipo / Integrantes")
     integrantes_data = [
@@ -70,23 +68,11 @@ elif menu == "2. Registro de Ingresos":
     st.title("📈 Registro de Ingresos")
     df_ingresos = data_dict['Registro de Ingresos']
     
-    st.markdown("### 📝 Tabla Interactiva (Modifica datos o elimina filas y guarda)")
-    
     column_config = {}
     if 'Responsable' in df_ingresos.columns:
-        column_config['Responsable'] = st.column_config.SelectboxColumn(
-            "Responsable",
-            options=INTEGRANTES_LISTA,
-            required=True
-        )
+        column_config['Responsable'] = st.column_config.SelectboxColumn("Responsable", options=INTEGRANTES_LISTA, required=True)
 
-    edited_ingresos = st.data_editor(
-        df_ingresos, 
-        use_container_width=True, 
-        num_rows="dynamic", 
-        key="editor_ingresos",
-        column_config=column_config
-    )
+    edited_ingresos = st.data_editor(df_ingresos, use_container_width=True, num_rows="dynamic", key="editor_ingresos", column_config=column_config)
     
     if st.button("💾 Guardar cambios en la tabla de Ingresos"):
         data_dict['Registro de Ingresos'] = edited_ingresos
@@ -106,15 +92,8 @@ elif menu == "2. Registro de Ingresos":
             responsable = st.selectbox("Responsable", INTEGRANTES_LISTA, index=1)
             observaciones = st.text_area("Observaciones")
         
-        submitted = st.form_submit_button("Guardar Ingreso")
-        if submitted:
-            nuevo_reg = pd.DataFrame({
-                'Fecha': [str(fecha)],
-                'Concepto': [concepto],
-                'Valor': [valor],
-                'Responsable': [responsable],
-                'Observaciones': [observaciones]
-            })
+        if st.form_submit_button("Guardar Ingreso"):
+            nuevo_reg = pd.DataFrame({'Fecha': [str(fecha)], 'Concepto': [concepto], 'Valor': [valor], 'Responsable': [responsable], 'Observaciones': [observaciones]})
             data_dict['Registro de Ingresos'] = pd.concat([df_ingresos, nuevo_reg], ignore_index=True)
             save_excel_data(data_dict)
             st.success("¡Ingreso agregado y guardado correctamente!")
@@ -125,29 +104,13 @@ elif menu == "3. Registro de Gastos":
     st.title("📉 Registro de Gastos")
     df_gastos = data_dict['Registro de Gastos']
     
-    st.markdown("### 📝 Tabla Interactiva (Modifica datos o elimina filas y guarda)")
-    
     column_config_g = {}
     if 'Responsable' in df_gastos.columns:
-        column_config_g['Responsable'] = st.column_config.SelectboxColumn(
-            "Responsable",
-            options=INTEGRANTES_LISTA,
-            required=True
-        )
+        column_config_g['Responsable'] = st.column_config.SelectboxColumn("Responsable", options=INTEGRANTES_LISTA, required=True)
     if 'Categoría' in df_gastos.columns:
-        column_config_g['Categoría'] = st.column_config.SelectboxColumn(
-            "Categoría",
-            options=["Logística", "Publicidad", "Alimentación", "Varios"],
-            required=True
-        )
+        column_config_g['Categoría'] = st.column_config.SelectboxColumn("Categoría", options=["Logística", "Publicidad", "Alimentación", "Varios"], required=True)
 
-    edited_gastos = st.data_editor(
-        df_gastos, 
-        use_container_width=True, 
-        num_rows="dynamic", 
-        key="editor_gastos",
-        column_config=column_config_g
-    )
+    edited_gastos = st.data_editor(df_gastos, use_container_width=True, num_rows="dynamic", key="editor_gastos", column_config=column_config_g)
     
     if st.button("💾 Guardar cambios en la tabla de Gastos"):
         data_dict['Registro de Gastos'] = edited_gastos
@@ -168,16 +131,8 @@ elif menu == "3. Registro de Gastos":
             responsable = st.selectbox("Responsable", INTEGRANTES_LISTA, index=2)
             observaciones = st.text_area("Observaciones")
         
-        submitted = st.form_submit_button("Guardar Gasto")
-        if submitted:
-            nuevo_reg = pd.DataFrame({
-                'Fecha': [str(fecha)],
-                'Concepto': [concepto],
-                'Categoría': [categoria],
-                'Valor': [valor],
-                'Responsable': [responsable],
-                'Observaciones': [observaciones]
-            })
+        if st.form_submit_button("Guardar Gasto"):
+            nuevo_reg = pd.DataFrame({'Fecha': [str(fecha)], 'Concepto': [concepto], 'Categoría': [categoria], 'Valor': [valor], 'Responsable': [responsable], 'Observaciones': [observaciones]})
             data_dict['Registro de Gastos'] = pd.concat([df_gastos, nuevo_reg], ignore_index=True)
             save_excel_data(data_dict)
             st.success("¡Gasto agregado y guardado correctamente!")
@@ -186,7 +141,6 @@ elif menu == "3. Registro de Gastos":
 # --- 4. BALANCE FINANCIERO ---
 elif menu == "4. Balance Financiero":
     st.title("⚖️ Balance Financiero General")
-    
     df_ing = data_dict['Registro de Ingresos']
     df_gas = data_dict['Registro de Gastos']
     
@@ -200,16 +154,12 @@ elif menu == "4. Balance Financiero":
     col3.metric("Saldo / Ganancia Neta", f"${saldo:,.0f}", delta=f"${saldo:,.0f}")
     
     st.markdown("---")
-    balance_df = pd.DataFrame({
-        "Concepto": ["Total de Ingresos", "Total de Gastos", "Saldo Final"],
-        "Valor ($)": [total_ingresos, total_gastos, saldo]
-    })
+    balance_df = pd.DataFrame({"Concepto": ["Total de Ingresos", "Total de Gastos", "Saldo Final"], "Valor ($)": [total_ingresos, total_gastos, saldo]})
     st.table(balance_df)
 
 # --- 5. DASHBOARD ---
 elif menu == "5. Dashboard y Gráficos":
     st.title("📊 Dashboard y Resumen Visual")
-    
     df_ing = data_dict['Registro de Ingresos']
     df_gas = data_dict['Registro de Gastos']
     
@@ -219,38 +169,25 @@ elif menu == "5. Dashboard y Gráficos":
     col1, col2 = st.columns(2)
     with col1:
         st.subheader("Comparativa Ingresos vs Gastos")
-        chart_data = pd.DataFrame({
-            "Tipo": ["Ingresos", "Gastos"],
-            "Monto": [total_ingresos, total_gastos]
-        }).set_index("Tipo")
-        st.bar_chart(chart_data)
-        
+        st.bar_chart(pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [total_ingresos, total_gastos]}).set_index("Tipo"))
     with col2:
         st.subheader("Gastos por Categoría")
         if 'Categoría' in df_gas.columns and 'Valor' in df_gas.columns:
             df_gas_copy = df_gas.copy()
             df_gas_copy['Valor'] = pd.to_numeric(df_gas_copy['Valor'], errors='coerce')
-            cat_grouped = df_gas_copy.groupby('Categoría')['Valor'].sum()
-            st.bar_chart(cat_grouped)
+            st.bar_chart(df_gas_copy.groupby('Categoría')['Valor'].sum())
         else:
             st.info("No hay suficientes datos de categorías.")
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
     st.title("🧾 Generador Automático de Recibos y Códigos QR")
-    st.markdown("Crea un recibo oficial en formato de texto estructurado y su respectivo código QR listo para escaneo rápido.")
-    
     df_anexo = data_dict['Anexo de recibos']
     st.dataframe(df_anexo, use_container_width=True)
     
-    st.markdown("### ➕ Crear Comprobante y QR")
-    
-    if 'ultimo_recibo_texto' not in st.session_state:
-        st.session_state.ultimo_recibo_texto = None
-    if 'ultimo_recibo_id' not in st.session_state:
-        st.session_state.ultimo_recibo_id = None
-    if 'ultimo_qr_img' not in st.session_state:
-        st.session_state.ultimo_qr_img = None
+    if 'ultimo_recibo_texto' not in st.session_state: st.session_state.ultimo_recibo_texto = None
+    if 'ultimo_recibo_id' not in st.session_state: st.session_state.ultimo_recibo_id = None
+    if 'ultimo_qr_img' not in st.session_state: st.session_state.ultimo_qr_img = None
 
     with st.form("form_qr_auto"):
         col1, col2 = st.columns(2)
@@ -263,28 +200,11 @@ elif menu == "6. Anexo de Recibos & QR":
             valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
             responsable = st.selectbox("Responsable que emite", INTEGRANTES_LISTA)
             
-        submitted = st.form_submit_button("Generar Comprobante y QR")
-        if submitted:
-            texto_recibo = (
-                f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
-                f"ID: {rec_id}\n"
-                f"Fecha: {fecha}\n"
-                f"Tipo: {tipo}\n"
-                f"Concepto: {concepto}\n"
-                f"Valor: ${valor:,.0f} COP\n"
-                f"Responsable: {responsable}\n"
-                f"Estado: Registrado y Verificado"
-            )
-            
-            # QR estructurado profesionalmente para lectura móvil
+        if st.form_submit_button("Generar Comprobante y QR"):
+            texto_recibo = f"=== COMPROBANTE OFICIAL DE EVENTO ===\nID: {rec_id}\nFecha: {fecha}\nTipo: {tipo}\nConcepto: {concepto}\nValor: ${valor:,.0f} COP\nResponsable: {responsable}\nEstado: Registrado y Verificado"
             texto_qr = f"ID:{rec_id}|TIPO:{tipo}|CONCEPTO:{concepto}|VALOR:${valor:,.0f}COP|RESP:{responsable}|ESTADO:OK"
             
-            qr = qrcode.QRCode(
-                version=None,
-                error_correction=qrcode.constants.ERROR_CORRECT_M,
-                box_size=8,
-                border=2,
-            )
+            qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=2)
             qr.add_data(texto_qr)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
@@ -292,44 +212,26 @@ elif menu == "6. Anexo de Recibos & QR":
             buf = BytesIO()
             img.save(buf, format="PNG")
             
-            nuevo_anexo = pd.DataFrame({
-                'ID': [rec_id],
-                'Fecha': [str(fecha)],
-                'Tipo (Ingreso/Gasto)': [tipo],
-                'Concepto': [concepto],
-                'Valor': [valor],
-                'Nombre del archivo o enlace': [f"Comprobante_{rec_id}.txt"],
-                'Código QR': [f"QR Oficial - {concepto}"]
-            })
+            nuevo_anexo = pd.DataFrame({'ID': [rec_id], 'Fecha': [str(fecha)], 'Tipo (Ingreso/Gasto)': [tipo], 'Concepto': [concepto], 'Valor': [valor], 'Nombre del archivo o enlace': [f"Comprobante_{rec_id}.txt"], 'Código QR': [f"QR Oficial - {concepto}"]})
             data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
             save_excel_data(data_dict)
             
             st.session_state.ultimo_recibo_texto = texto_recibo
             st.session_state.ultimo_recibo_id = rec_id
             st.session_state.ultimo_qr_img = buf.getvalue()
-            
             st.success("¡Comprobante y QR generado con éxito!")
 
     if st.session_state.ultimo_recibo_texto is not None:
         st.markdown("---")
-        st.subheader(f"📄 Vista Previa del Comprobante: {st.session_state.ultimo_recibo_id}")
-        col_v1, col_v2 = st.columns(2)
-        with col_v1:
-            st.text(st.session_state.ultimo_recibo_texto)
-        with col_v2:
-            st.image(st.session_state.ultimo_qr_img, caption=f"Código QR Oficial - {st.session_state.ultimo_recibo_id}", width=180)
-        
-        st.download_button(
-            label="📥 Descargar Comprobante (.txt)",
-            data=st.session_state.ultimo_recibo_texto,
-            file_name=f"{st.session_state.ultimo_recibo_id}_comprobante.txt",
-            mime="text/plain"
-        )
+        st.subheader(f"📄 Vista Previa: {st.session_state.ultimo_recibo_id}")
+        c1, c2 = st.columns(2)
+        with c1: st.text(st.session_state.ultimo_recibo_texto)
+        with c2: st.image(st.session_state.ultimo_qr_img, width=180)
+        st.download_button(label="📥 Descargar Comprobante (.txt)", data=st.session_state.ultimo_recibo_texto, file_name=f"{st.session_state.ultimo_recibo_id}.txt", mime="text/plain")
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
     st.title("📑 Reporte Final del Evento")
-    
     df_ing = data_dict['Registro de Ingresos']
     df_gas = data_dict['Registro de Gastos']
     
@@ -337,19 +239,9 @@ elif menu == "7. Reporte Final":
     total_gastos = pd.to_numeric(df_gas['Valor'], errors='coerce').sum() if 'Valor' in df_gas.columns else 0
     saldo = total_ingresos - total_gastos
     
-    st.markdown("### Resumen Ejecutivo")
     st.write(f"- **Total Recaudado:** ${total_ingresos:,.0f} COP")
     st.write(f"- **Total Invertido/Gastado:** ${total_gastos:,.0f} COP")
     st.write(f"- **Ganancia Neta Obtenida:** ${saldo:,.0f} COP")
     
-    st.markdown("### 💡 Evaluación de la Gestión")
-    st.success("El proyecto se ejecutó exitosamente cumpliendo con los registros financieros y soportes digitales correspondientes.")
-    
-    st.markdown("### 📥 Descargar Archivo Excel Actualizado")
     with open(EXCEL_FILE, "rb") as f:
-        st.download_button(
-            label="Descargar Excel Completo",
-            data=f,
-            file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+        st.download_button("Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
