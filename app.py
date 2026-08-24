@@ -241,48 +241,73 @@ elif menu == "5. Dashboard y Gráficos":
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
-    st.title("🧾 Anexo de Recibos y Generador de Códigos QR")
+    st.title("🧾 Generador Automático de Recibos y Códigos QR")
+    st.markdown("Crea un recibo oficial en texto generado por el sistema y su respectivo código QR sin necesidad de enlaces externos.")
     
     df_anexo = data_dict['Anexo de recibos']
     st.dataframe(df_anexo, use_container_width=True)
     
-    st.markdown("### ➕ Registrar Comprobante / Recibo y Generar QR")
-    with st.form("form_qr"):
+    st.markdown("### ➕ Crear Recibo Digital y QR")
+    with st.form("form_qr_auto"):
         col1, col2 = st.columns(2)
         with col1:
-            rec_id = st.text_input("ID Recibo (ej. REC-009)", value=f"REC-00{len(df_anexo)+1}")
-            fecha = st.date_input("Fecha Recibo")
-            tipo = st.selectbox("Tipo", ["Ingreso", "Gasto"])
-            concepto = st.text_input("Concepto del Recibo")
+            rec_id = st.text_input("ID Recibo", value=f"REC-00{len(df_anexo)+1}")
+            fecha = st.date_input("Fecha")
+            tipo = st.selectbox("Tipo de Movimiento", ["Ingreso", "Gasto"])
+            concepto = st.text_input("Concepto (ej. Pago de sonido / Venta boleta)")
         with col2:
             valor = st.number_input("Valor ($)", min_value=0.0, step=1000.0)
-            enlace = st.text_input("Enlace del Comprobante (URL real o Drive)", value="https://")
+            responsable = st.selectbox("Responsable que emite", INTEGRANTES_LISTA)
             
-        submitted = st.form_submit_button("Generar QR Real y Guardar")
+        submitted = st.form_submit_button("Generar Recibo y QR Automático")
         if submitted:
-            # Crear QR apuntando directamente al enlace real proporcionado
+            # Crear texto estructurado del recibo oficial
+            texto_recibo = (
+                f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
+                f"ID: {rec_id}\n"
+                f"Fecha: {fecha}\n"
+                f"Tipo: {tipo}\n"
+                f"Concepto: {concepto}\n"
+                f"Valor: ${valor:,.0f} COP\n"
+                f"Responsable: {responsable}\n"
+                f"Estado: Registrado y Verificado"
+            )
+            
+            # Generar QR con los datos incrustados del recibo
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
-            qr.add_data(enlace)
+            qr.add_data(texto_recibo)
             qr.make(fit=True)
             img = qr.make_image(fill_color="black", back_color="white")
             
             buf = BytesIO()
             img.save(buf, format="PNG")
             
+            # Guardar en el DataFrame de anexo
             nuevo_anexo = pd.DataFrame({
                 'ID': [rec_id],
                 'Fecha': [str(fecha)],
                 'Tipo (Ingreso/Gasto)': [tipo],
                 'Concepto': [concepto],
                 'Valor': [valor],
-                'Nombre del archivo o enlace': [enlace],
-                'Código QR': [f"QR Funcional para: {enlace}"]
+                'Nombre del archivo o enlace': [f"Recibo Interno #{rec_id}"],
+                'Código QR': [f"QR Generado - {concepto}"]
             })
             data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
             save_excel_data(data_dict)
             
-            st.success("¡Recibo registrado y código QR funcional generado!")
-            st.image(buf.getvalue(), caption=f"Escanea para abrir: {enlace}", width=200)
+            st.success("¡Recibo y QR generado con éxito!")
+            
+            # Mostrar vista previa del recibo en pantalla y su QR
+            st.text(texto_recibo)
+            st.image(buf.getvalue(), caption=f"Código QR Oficial - {rec_id}", width=200)
+            
+            # Botón para descargar el recibo como archivo de texto plano (.txt)
+            st.download_button(
+                label="📥 Descargar este Recibo en Texto (.txt)",
+                data=texto_recibo,
+                file_name=f"{rec_id}_comprobante.txt",
+                mime="text/plain"
+            )
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
