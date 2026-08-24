@@ -248,6 +248,15 @@ elif menu == "6. Anexo de Recibos & QR":
     st.dataframe(df_anexo, use_container_width=True)
     
     st.markdown("### ➕ Crear Recibo Digital y QR")
+    
+    # Usamos variables de estado en sesión para retener el recibo recién creado fuera del formulario
+    if 'ultimo_recibo_texto' not in st.session_state:
+        st.session_state.ultimo_recibo_texto = None
+    if 'ultimo_recibo_id' not in st.session_state:
+        st.session_state.ultimo_recibo_id = None
+    if 'ultimo_qr_img' not in st.session_state:
+        st.session_state.ultimo_qr_img = None
+
     with st.form("form_qr_auto"):
         col1, col2 = st.columns(2)
         with col1:
@@ -261,7 +270,6 @@ elif menu == "6. Anexo de Recibos & QR":
             
         submitted = st.form_submit_button("Generar Recibo y QR Automático")
         if submitted:
-            # Crear texto estructurado del recibo oficial
             texto_recibo = (
                 f"=== COMPROBANTE OFICIAL DE EVENTO ===\n"
                 f"ID: {rec_id}\n"
@@ -273,7 +281,6 @@ elif menu == "6. Anexo de Recibos & QR":
                 f"Estado: Registrado y Verificado"
             )
             
-            # Generar QR con los datos incrustados del recibo
             qr = qrcode.QRCode(version=1, box_size=10, border=5)
             qr.add_data(texto_recibo)
             qr.make(fit=True)
@@ -282,7 +289,6 @@ elif menu == "6. Anexo de Recibos & QR":
             buf = BytesIO()
             img.save(buf, format="PNG")
             
-            # Guardar en el DataFrame de anexo
             nuevo_anexo = pd.DataFrame({
                 'ID': [rec_id],
                 'Fecha': [str(fecha)],
@@ -295,19 +301,26 @@ elif menu == "6. Anexo de Recibos & QR":
             data_dict['Anexo de recibos'] = pd.concat([df_anexo, nuevo_anexo], ignore_index=True)
             save_excel_data(data_dict)
             
+            # Guardar en session state para mostrarlo afuera del formulario
+            st.session_state.ultimo_recibo_texto = texto_recibo
+            st.session_state.ultimo_recibo_id = rec_id
+            st.session_state.ultimo_qr_img = buf.getvalue()
+            
             st.success("¡Recibo y QR generado con éxito!")
-            
-            # Mostrar vista previa del recibo en pantalla y su QR
-            st.text(texto_recibo)
-            st.image(buf.getvalue(), caption=f"Código QR Oficial - {rec_id}", width=200)
-            
-            # Botón para descargar el recibo como archivo de texto plano (.txt)
-            st.download_button(
-                label="📥 Descargar este Recibo en Texto (.txt)",
-                data=texto_recibo,
-                file_name=f"{rec_id}_comprobante.txt",
-                mime="text/plain"
-            )
+
+    # FUERA DEL FORMULARIO: Mostrar vista previa y botón de descarga seguros
+    if st.session_state.ultimo_recibo_texto is not None:
+        st.markdown("---")
+        st.subheader(f"📄 Vista Previa del Recibo: {st.session_state.ultimo_recibo_id}")
+        st.text(st.session_state.ultimo_recibo_texto)
+        st.image(st.session_state.ultimo_qr_img, caption=f"Código QR Oficial - {st.session_state.ultimo_recibo_id}", width=200)
+        
+        st.download_button(
+            label="📥 Descargar este Recibo en Texto (.txt)",
+            data=st.session_state.ultimo_recibo_texto,
+            file_name=f"{st.session_state.ultimo_recibo_id}_comprobante.txt",
+            mime="text/plain"
+        )
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
