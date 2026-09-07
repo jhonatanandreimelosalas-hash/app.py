@@ -4,6 +4,7 @@ import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 from openpyxl.utils import get_column_letter
 import qrcode
+from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from datetime import datetime
 import plotly.express as px
@@ -78,11 +79,82 @@ def guardar_todo_en_excel():
     except Exception:
         pass
 
+# --- FUNCIÓN PARA GENERAR IMAGEN DE RECIBO DECORADA ---
+def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
+    # Crear un lienzo en blanco de 650x850 píxeles con fondo blanco limpio
+    img_w, img_h = 650, 880
+    base_img = Image.new("RGB", (img_w, img_h), color="#FFFFFF")
+    draw = ImageDraw.Draw(base_img)
+    
+    # Intentar cargar fuentes estándar de sistema o usar por defecto
+    try:
+        font_title = ImageFont.truetype("arial.ttf", 22)
+        font_bold = ImageFont.truetype("arialbd.ttf", 15)
+        font_regular = ImageFont.truetype("arial.ttf", 14)
+        font_small = ImageFont.truetype("arial.ttf", 11)
+    except IOError:
+        font_title = font_bold = font_regular = font_small = ImageFont.load_default()
+
+    # Franja superior institucional (Color Azul Oscuro)
+    draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
+    draw.text((30, 25), "COLEGIO FRANCISCO DE PAULA SANTANDER", fill="#FFFFFF", font=font_title)
+    draw.text((30, 60), "Comprobante General de Balance Financiero", fill="#93C5FD", font=font_regular)
+    
+    # Cuadro contenedor principal con borde elegante
+    draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
+    
+    # Datos de Metadatos del Recibo
+    draw.text((55, 160), f"ID de Comprobante:", fill="#64748B", font=font_small)
+    draw.text((200, 158), f"{rec_id}", fill="#1E293B", font=font_bold)
+    
+    draw.text((55, 190), f"Fecha de Emisión:", fill="#64748B", font=font_small)
+    draw.text((200, 188), f"{fecha}", fill="#1E293B", font=font_bold)
+
+    draw.text((55, 220), f"Institución:", fill="#64748B", font=font_small)
+    draw.text((200, 218), f"Proyecto de Vida - Eventos", fill="#1E293B", font=font_bold)
+    
+    # Línea divisoria
+    draw.line([(55, 255), (img_w - 55, 255)], fill="#CBD5E1", width=1)
+    
+    # Sección de Valores Financieros
+    draw.text((55, 280), "RESUMEN DE MOVIMIENTOS", fill="#1E3A8A", font=font_bold)
+    
+    draw.text((55, 320), "(+) Total Ingresos:", fill="#334155", font=font_regular)
+    draw.text((400, 320), f"${tot_ing:,.0f} COP", fill="#059669", font=font_bold)
+    
+    draw.text((55, 360), "(-) Total Gastos:", fill="#334155", font=font_regular)
+    draw.text((400, 360), f"${tot_gas:,.0f} COP", fill="#DC2626", font=font_bold)
+    
+    # Línea divisoria de saldo
+    draw.line([(55, 400), (img_w - 55, 400)], fill="#CBD5E1", width=1)
+    
+    draw.text((55, 420), "BALANCE NETO FINAL:", fill="#1E3A8A", font=font_bold)
+    color_saldo = "#059669" if saldo >= 0 else "#DC2626"
+    draw.text((370, 415), f"${saldo:,.0f} COP", fill=color_saldo, font=font_title)
+    
+    estado_txt = "ESTADO: APROBADO (SUPERÁVIT)" if saldo >= 0 else "ESTADO: ALERTA (DÉFICIT)"
+    draw.text((55, 465), estado_txt, fill=color_saldo, font=font_small)
+
+    # Pegar el Código QR centrado en la parte inferior
+    qr_resized = qr_img_pil.resize((180, 180))
+    base_img.paste(qr_resized, (int((img_w - 180) / 2), 510))
+    
+    # Texto de pie de página debajo del QR
+    draw.text((int(img_w / 2) - 130, 710), "Escanea este código QR para validar", fill="#64748B", font=font_small)
+    draw.text((int(img_w / 2) - 120, 730), "la información general del balance", fill="#64748B", font=font_small)
+    
+    draw.text((int(img_w / 2) - 110, 800), "Sistema Automático de Gestión Financiera", fill="#94A3B8", font=font_small)
+
+    # Guardar en buffer de memoria
+    buffer_img = BytesIO()
+    base_img.save(buffer_img, format="PNG")
+    buffer_img.seek(0)
+    return buffer_img
+
 # --- MENÚ LATERAL Y BACKUP ---
 st.sidebar.markdown("### 💰 Control Financiero")
 st.sidebar.markdown("---")
 
-# Configuración de Presupuesto Máximo en la barra lateral
 st.sidebar.markdown("⚙️ **Configuración de Presupuesto**")
 presupuesto_tope = st.sidebar.number_input("Presupuesto / Límite de Gastos ($)", min_value=0.0, value=500000.0, step=50000.0)
 
@@ -98,7 +170,6 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
 ])
 st.sidebar.markdown("---")
 
-# Botón de Copia de Seguridad (Backup) en la barra lateral
 st.sidebar.markdown("📦 **Copias de Seguridad**")
 guardar_todo_en_excel()
 try:
@@ -292,12 +363,12 @@ elif menu == "5. Dashboard y Gráficos":
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
     st.markdown('<p class="main-header">🧾 Generador de Comprobante General</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Emite un soporte oficial del balance general del proyecto</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Emite un soporte oficial del balance general del proyecto con descarga en imagen decorada</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    st.info("💡 Haz clic en el botón para generar un recibo general consolidado con el estado financiero actual asociado al Colegio Francisco de Paula Santander.")
+    st.info("💡 Haz clic en el botón para generar el comprobante general con su código QR integrado, listo para visualizar o descargar como una imagen decorada de alta calidad.")
 
-    if st.button("🚀 Generar Recibo General"):
+    if st.button("🚀 Generar Comprobante e Imagen"):
         tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
         tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
         saldo = tot_ing - tot_gas
@@ -318,24 +389,36 @@ elif menu == "6. Anexo de Recibos & QR":
             f"Estado: {'Aprobado (Superávit)' if saldo >= 0 else 'Alerta (Déficit)'}"
         )
         
-        qr = qrcode.QRCode(box_size=8, border=2)
+        # Generar QR en Pillow
+        qr = qrcode.QRCode(box_size=10, border=2)
         qr.add_data(texto_recibo)
         qr.make(fit=True)
-        img = qr.make_image(fill_color="black", back_color="white")
-        buf = BytesIO()
-        img.save(buf, format="PNG")
+        img_qr_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         
-        st.session_state.rec_txt = texto_recibo
+        # Crear la imagen decorada del recibo
+        img_recibo_buffer = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, img_qr_pil)
+        
+        # Guardar en session_state para mostrar en pantalla y descargar
         st.session_state.rec_id = rec_id
-        st.session_state.rec_qr = buf.getvalue()
-        st.success("¡Comprobante general generado exitosamente!")
+        st.session_state.rec_img_bytes = img_recibo_buffer.getvalue()
+        st.success("¡Comprobante e imagen decorada generados exitosamente!")
 
-    if 'rec_txt' in st.session_state:
-        c1, c2 = st.columns([2, 1])
-        with c1:
-            st.text_area("Comprobante", st.session_state.rec_txt, height=220)
-        with c2:
-            st.image(st.session_state.rec_qr, width=200)
+    if 'rec_img_bytes' in st.session_state:
+        st.markdown("### 🖼️ Vista Previa del Recibo Diseñado")
+        
+        col_prev1, col_prev2 = st.columns([1, 1])
+        with col_prev1:
+            st.image(st.session_state.rec_img_bytes, caption=f"Comprobante {st.session_state.rec_id}", use_container_width=True)
+        with col_prev2:
+            st.markdown("#### Opciones de Descarga")
+            st.write("Puedes guardar este recibo directamente en tu dispositivo como una imagen PNG decorada para enviarla por WhatsApp o imprimirla.")
+            
+            st.download_button(
+                label="📥 Descargar Recibo como Imagen PNG",
+                data=st.session_state.rec_img_bytes,
+                file_name=f"Comprobante_Balance_{st.session_state.rec_id}.png",
+                mime="image/png"
+            )
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
