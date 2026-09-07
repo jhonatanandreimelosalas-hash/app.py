@@ -30,9 +30,11 @@ st.markdown("""
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
 INTEGRANTES_LISTA = [
+    "Saray Medina",
     "Ivan Santiago Valencia Villamil",
     "Nicol Vanegas Cruz",
-    "Jhonatan Andrey Melo",
+    "Sahra Sofia Águila Vargas",
+    "Shara Aguilar",
     "Alejandro Martinez Rubio"
 ]
 
@@ -126,10 +128,12 @@ if menu == "1. Inicio":
     st.markdown("---")
     st.markdown("### 👥 Equipo de Trabajo")
     integrantes_data = [
-        {"N.°": 1, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
-        {"N.°": 2, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
-        {"N.°": 3, "Nombre Completo": "Jhonatan Andrey Melo", "Rol / Responsabilidad": "Control de Gastos e Insumos"},
-        {"N.°": 4, "Nombre Completo": "Alejandro Martinez Rubio", "Rol / Responsabilidad": "Soportes y Control de Balance"},
+        {"N.°": 1, "Nombre Completo": "Saray Medina", "Rol / Responsabilidad": "Estudiante Titular / Proyecto de Vida"},
+        {"N.°": 2, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
+        {"N.°": 3, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
+        {"N.°": 4, "Nombre Completo": "Sahra Sofia Águila Vargas", "Rol / Responsabilidad": "Control de Gastos e Insumos"},
+        {"N.°": 5, "Nombre Completo": "Shara Aguilar", "Rol / Responsabilidad": "Apoyo Logístico"},
+        {"N.°": 6, "Nombre Completo": "Alejandro Martinez Rubio", "Rol / Responsabilidad": "Soportes y Control de Balance"},
     ]
     st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
 
@@ -169,7 +173,6 @@ elif menu == "2. Registro de Ingresos":
 
     st.markdown("### 📋 Listado Actual de Ingresos y Filtros")
     if not st.session_state.ingresos_df.empty:
-        # Filtros Rápidos
         f_col1, f_col2 = st.columns(2)
         with f_col1:
             filtro_resp_i = st.selectbox("Filtrar por Responsable (Ingresos):", ["Todos"] + INTEGRANTES_LISTA)
@@ -190,7 +193,6 @@ elif menu == "3. Registro de Gastos":
     st.markdown('<p class="sub-header">Controla los egresos y compras del evento con alertas de presupuesto</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    # Alerta visual de presupuesto tope
     current_total_gastos = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
     if presupuesto_tope > 0 and current_total_gastos > presupuesto_tope:
         st.error(f"🚨 ¡ATENCIÓN! Los gastos actuales (${current_total_gastos:,.0f}) superan el presupuesto límite configurado (${presupuesto_tope:,.0f}).")
@@ -227,7 +229,6 @@ elif menu == "3. Registro de Gastos":
 
     st.markdown("### 📋 Listado Actual de Gastos y Filtros")
     if not st.session_state.gastos_df.empty:
-        # Filtros Rápidos
         f_col1, f_col2 = st.columns(2)
         with f_col1:
             filtro_resp_g = st.selectbox("Filtrar por Responsable (Gastos):", ["Todos"] + INTEGRANTES_LISTA)
@@ -290,49 +291,51 @@ elif menu == "5. Dashboard y Gráficos":
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
-    st.markdown('<p class="main-header">🧾 Generador de Comprobantes y Códigos QR</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Emite soportes oficiales de cada movimiento</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">🧾 Generador de Comprobante General</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Emite un soporte oficial del balance general del proyecto</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    opciones = []
-    for _, r in st.session_state.ingresos_df.iterrows():
-        opciones.append(f"[INGRESO] {r['Fecha']} - {r['Concepto']} (${float(r['Valor']):,.0f})")
-    for _, r in st.session_state.gastos_df.iterrows():
-        opciones.append(f"[GASTO] {r['Fecha']} - {r['Concepto']} (${float(r['Valor']):,.0f})")
+    st.info("💡 Haz clic en el botón para generar un recibo general consolidado con el estado financiero actual asociado al Colegio Francisco de Paula Santander.")
 
-    if not opciones:
-        st.warning("⚠️ No hay movimientos registrados para generar comprobantes.")
-    else:
-        mov_sel = st.selectbox("🔍 Selecciona el movimiento:", opciones)
-        if st.button("🚀 Generar Comprobante"):
-            is_ing = "[INGRESO]" in mov_sel
-            rec_id = f"REC-{abs(hash(mov_sel)) % 10000:04d}"
-            
-            if is_ing:
-                fila = st.session_state.ingresos_df[st.session_state.ingresos_df.apply(lambda x: f"[INGRESO] {x['Fecha']} - {x['Concepto']} (${float(x['Valor']):,.0f})" == mov_sel, axis=1)].iloc[0]
-            else:
-                fila = st.session_state.gastos_df[st.session_state.gastos_df.apply(lambda x: f"[GASTO] {x['Fecha']} - {x['Concepto']} (${float(x['Valor']):,.0f})" == mov_sel, axis=1)].iloc[0]
-            
-            texto_recibo = f"=== COMPROBANTE OFICIAL ===\nID: {rec_id}\nFecha: {fila['Fecha']}\nConcepto: {fila['Concepto']}\nValor: ${float(fila['Valor']):,.0f} COP"
-            
-            qr = qrcode.QRCode(box_size=8, border=2)
-            qr.add_data(texto_recibo)
-            qr.make(fit=True)
-            img = qr.make_image(fill_color="black", back_color="white")
-            buf = BytesIO()
-            img.save(buf, format="PNG")
-            
-            st.session_state.rec_txt = texto_recibo
-            st.session_state.rec_id = rec_id
-            st.session_state.rec_qr = buf.getvalue()
-            st.success("¡Comprobante generado!")
+    if st.button("🚀 Generar Recibo General"):
+        tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
+        tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+        saldo = tot_ing - tot_gas
+
+        rec_id = f"GEN-{datetime.now().strftime('%Y%m%d%H%M')}"
+        fecha_actual = datetime.now().strftime('%Y-%m-%d %H:%M')
+        
+        texto_recibo = (
+            f"=== COMPROBANTE GENERAL DE BALANCE ===\n"
+            f"ID: {rec_id}\n"
+            f"Fecha de Emisión: {fecha_actual}\n"
+            f"Institución: Colegio Francisco de Paula Santander\n"
+            f"--------------------------------------\n"
+            f"Total Ingresos: ${tot_ing:,.0f} COP\n"
+            f"Total Gastos: ${tot_gas:,.0f} COP\n"
+            f"BALANCE NETO: ${saldo:,.0f} COP\n"
+            f"--------------------------------------\n"
+            f"Estado: {'Aprobado (Superávit)' if saldo >= 0 else 'Alerta (Déficit)'}"
+        )
+        
+        qr = qrcode.QRCode(box_size=8, border=2)
+        qr.add_data(texto_recibo)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        buf = BytesIO()
+        img.save(buf, format="PNG")
+        
+        st.session_state.rec_txt = texto_recibo
+        st.session_state.rec_id = rec_id
+        st.session_state.rec_qr = buf.getvalue()
+        st.success("¡Comprobante general generado exitosamente!")
 
     if 'rec_txt' in st.session_state:
         c1, c2 = st.columns([2, 1])
         with c1:
-            st.text_area("Comprobante", st.session_state.rec_txt, height=150)
+            st.text_area("Comprobante", st.session_state.rec_txt, height=220)
         with c2:
-            st.image(st.session_state.rec_qr, width=160)
+            st.image(st.session_state.rec_qr, width=200)
 
 # --- 7. REPORTE FINAL ---
 elif menu == "7. Reporte Final":
