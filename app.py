@@ -6,6 +6,7 @@ from openpyxl.utils import get_column_letter
 import qrcode
 from io import BytesIO
 from datetime import datetime
+import plotly.express as px
 
 # Configuración inicial de la página
 st.set_page_config(
@@ -15,12 +16,14 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS personalizados
+# Estilos CSS modernos y personalizados
 st.markdown("""
     <style>
-        .main-header { font-size: 2.2rem; color: #1E3A8A; font-weight: 700; margin-bottom: 0px; }
+        .main-header { font-size: 2.3rem; color: #1E3A8A; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }
         .sub-header { font-size: 1.1rem; color: #4B5563; margin-bottom: 20px; }
-        .stButton>button { width: 100%; border-radius: 6px; font-weight: 600; }
+        .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; background-color: #1E3A8A; color: white; transition: 0.3s; }
+        .stButton>button:hover { background-color: #2563EB; border-color: #2563EB; }
+        div.stMetric { background-color: #F8FAFC; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -35,7 +38,6 @@ INTEGRANTES_LISTA = [
 
 # --- INICIALIZAR ESTADO DE DATOS LIMPIOS EN SESSION_STATE ---
 if 'ingresos_df' not in st.session_state:
-    # Creamos un DataFrame limpio estructurado por defecto si no existe
     st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones"])
 
 if 'gastos_df' not in st.session_state:
@@ -47,7 +49,6 @@ def guardar_todo_en_excel():
         st.session_state.ingresos_df.to_excel(writer, sheet_name='Registro de Ingresos', index=False)
         st.session_state.gastos_df.to_excel(writer, sheet_name='Registro de Gastos', index=False)
     
-    # Dar formato con openpyxl
     try:
         wb = openpyxl.load_workbook(EXCEL_FILE)
         font_header = Font(name="Arial", size=11, bold=True, color="FFFFFF")
@@ -75,8 +76,14 @@ def guardar_todo_en_excel():
     except Exception:
         pass
 
-# --- MENÚ LATERAL ---
+# --- MENÚ LATERAL Y BACKUP ---
 st.sidebar.markdown("### 💰 Control Financiero")
+st.sidebar.markdown("---")
+
+# Configuración de Presupuesto Máximo en la barra lateral
+st.sidebar.markdown("⚙️ **Configuración de Presupuesto**")
+presupuesto_tope = st.sidebar.number_input("Presupuesto / Límite de Gastos ($)", min_value=0.0, value=500000.0, step=50000.0)
+
 st.sidebar.markdown("---")
 menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "1. Inicio", 
@@ -89,6 +96,20 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
 ])
 st.sidebar.markdown("---")
 
+# Botón de Copia de Seguridad (Backup) en la barra lateral
+st.sidebar.markdown("📦 **Copias de Seguridad**")
+guardar_todo_en_excel()
+try:
+    with open(EXCEL_FILE, "rb") as f:
+        st.sidebar.download_button(
+            label="📥 Descargar Backup Diario",
+            data=f,
+            file_name=f"Backup_Financiero_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+except Exception:
+    pass
+
 # --- 1. INICIO ---
 if menu == "1. Inicio":
     st.markdown('<p class="main-header">🏛️ Proyecto de Control y Gestión Financiera</p>', unsafe_allow_html=True)
@@ -98,7 +119,7 @@ if menu == "1. Inicio":
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("### 🎯 Objetivo del Sistema")
-        st.write("Control transparente y automatizado de los movimientos monetarios, auditoría en tiempo real y generación de comprobantes.")
+        st.write("Control transparente y automatizado de los movimientos monetarios, auditoría en tiempo real, gestión de presupuestos y generación de comprobantes con Plotly.")
     with col2:
         st.success("✅ **Estado del Sistema:** Operativo y Sincronizado.")
 
@@ -146,9 +167,18 @@ elif menu == "2. Registro de Ingresos":
                     st.success("¡Ingreso agregado y sumado exitosamente!")
                     st.rerun()
 
-    st.markdown("### 📋 Listado Actual de Ingresos")
+    st.markdown("### 📋 Listado Actual de Ingresos y Filtros")
     if not st.session_state.ingresos_df.empty:
-        st.dataframe(st.session_state.ingresos_df, use_container_width=True, hide_index=True)
+        # Filtros Rápidos
+        f_col1, f_col2 = st.columns(2)
+        with f_col1:
+            filtro_resp_i = st.selectbox("Filtrar por Responsable (Ingresos):", ["Todos"] + INTEGRANTES_LISTA)
+        
+        df_mostrar_i = st.session_state.ingresos_df.copy()
+        if filtro_resp_i != "Todos":
+            df_mostrar_i = df_mostrar_i[df_mostrar_i["Responsable"] == filtro_resp_i]
+
+        st.dataframe(df_mostrar_i, use_container_width=True, hide_index=True)
         total_ing = st.session_state.ingresos_df["Valor"].astype(float).sum()
         st.metric(label="💵 TOTAL INGRESOS", value=f"${total_ing:,.0f} COP")
     else:
@@ -157,9 +187,16 @@ elif menu == "2. Registro de Ingresos":
 # --- 3. REGISTRO DE GASTOS ---
 elif menu == "3. Registro de Gastos":
     st.markdown('<p class="main-header">📉 Registro de Gastos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Controla los egresos y compras del evento</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Controla los egresos y compras del evento con alertas de presupuesto</p>', unsafe_allow_html=True)
     st.markdown("---")
     
+    # Alerta visual de presupuesto tope
+    current_total_gastos = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+    if presupuesto_tope > 0 and current_total_gastos > presupuesto_tope:
+        st.error(f"🚨 ¡ATENCIÓN! Los gastos actuales (${current_total_gastos:,.0f}) superan el presupuesto límite configurado (${presupuesto_tope:,.0f}).")
+    elif presupuesto_tope > 0:
+        st.info(f"ℹ️ Presupuesto disponible: ${(presupuesto_tope - current_total_gastos):,.0f} COP de un tope de ${presupuesto_tope:,.0f} COP.")
+
     with st.expander("➕ Agregar Nuevo Gasto", expanded=True):
         with st.form("form_nuevo_gasto"):
             c1, c2 = st.columns(2)
@@ -188,9 +225,22 @@ elif menu == "3. Registro de Gastos":
                     st.success("¡Gasto agregado y sumado exitosamente!")
                     st.rerun()
 
-    st.markdown("### 📋 Listado Actual de Gastos")
+    st.markdown("### 📋 Listado Actual de Gastos y Filtros")
     if not st.session_state.gastos_df.empty:
-        st.dataframe(st.session_state.gastos_df, use_container_width=True, hide_index=True)
+        # Filtros Rápidos
+        f_col1, f_col2 = st.columns(2)
+        with f_col1:
+            filtro_resp_g = st.selectbox("Filtrar por Responsable (Gastos):", ["Todos"] + INTEGRANTES_LISTA)
+        with f_col2:
+            filtro_cat_g = st.selectbox("Filtrar por Categoría:", ["Todas", "Logística", "Publicidad", "Alimentación", "Varios"])
+
+        df_mostrar_g = st.session_state.gastos_df.copy()
+        if filtro_resp_g != "Todos":
+            df_mostrar_g = df_mostrar_g[df_mostrar_g["Responsable"] == filtro_resp_g]
+        if filtro_cat_g != "Todas":
+            df_mostrar_g = df_mostrar_g[df_mostrar_g["Categoría"] == filtro_cat_g]
+
+        st.dataframe(df_mostrar_g, use_container_width=True, hide_index=True)
         total_gas = st.session_state.gastos_df["Valor"].astype(float).sum()
         st.metric(label="💸 TOTAL GASTOS", value=f"${total_gas:,.0f} COP")
     else:
@@ -214,7 +264,7 @@ elif menu == "4. Balance Financiero":
 # --- 5. DASHBOARD ---
 elif menu == "5. Dashboard y Gráficos":
     st.markdown('<p class="main-header">📊 Dashboard y Resumen Visual</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Análisis gráfico del comportamiento financiero</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Análisis gráfico avanzado con gráficos interactivos (Plotly)</p>', unsafe_allow_html=True)
     st.markdown("---")
     
     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
@@ -223,13 +273,20 @@ elif menu == "5. Dashboard y Gráficos":
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### ⚖️ Comparativa Ingresos vs Gastos")
-        st.bar_chart(pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [tot_ing, tot_gas]}).set_index("Tipo"))
+        df_comp = pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [tot_ing, tot_gas]})
+        fig_bar = px.bar(df_comp, x="Tipo", y="Monto", color="Tipo", text_auto=True, color_discrete_sequence=["#10B981", "#EF4444"])
+        fig_bar.update_layout(showlegend=False, margin=dict(t=20, b=20, l=20, r=20))
+        st.plotly_chart(fig_bar, use_container_width=True)
+
     with col2:
-        st.markdown("#### 🏷️ Gastos por Categoría")
+        st.markdown("#### 🍩 Gastos por Categoría (Gráfico Circular)")
         if not st.session_state.gastos_df.empty:
-            st.bar_chart(st.session_state.gastos_df.groupby("Categoría")["Valor"].sum())
+            df_cat = st.session_state.gastos_df.groupby("Categoría")["Valor"].sum().reset_index()
+            fig_pie = px.pie(df_cat, names="Categoría", values="Valor", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
+            fig_pie.update_layout(margin=dict(t=20, b=20, l=20, r=20))
+            st.plotly_chart(fig_pie, use_container_width=True)
         else:
-            st.info("No hay datos de gastos para graficar.")
+            st.info("No hay datos de gastos suficientes para graficar la distribución.")
 
 # --- 6. ANEXO DE RECIBOS & QR ---
 elif menu == "6. Anexo de Recibos & QR":
@@ -251,7 +308,6 @@ elif menu == "6. Anexo de Recibos & QR":
             is_ing = "[INGRESO]" in mov_sel
             rec_id = f"REC-{abs(hash(mov_sel)) % 10000:04d}"
             
-            # Buscar datos del registro seleccionado
             if is_ing:
                 fila = st.session_state.ingresos_df[st.session_state.ingresos_df.apply(lambda x: f"[INGRESO] {x['Fecha']} - {x['Concepto']} (${float(x['Valor']):,.0f})" == mov_sel, axis=1)].iloc[0]
             else:
