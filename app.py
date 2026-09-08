@@ -189,7 +189,7 @@ if st.session_state.ia_abierta:
     with st.sidebar.container():
         st.markdown("### 🧠 Chat Asesor IA")
         api_key_input = st.text_input("Gemini API Key:", type="password", key="api_key_ia")
-        pregunta_ia = st.text_input("¿Qué deseas consultar?", placeholder="Ej: ¿Cómo vamos con los gastos?")
+        pregunta_ia = st.text_input("¿Qué deseas consultar?", placeholder="Ej: ¿Cómo van los gastos?")
         
         if st.button("Consultar IA"):
             if api_key_input.strip() != "":
@@ -206,9 +206,9 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    # Llamada corregida para google-genai
+                    # Llamada actualizada con el modelo gemini-3.6-flash requerido
                     response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.6-flash",
                         contents=prompt_completo,
                     )
                     
