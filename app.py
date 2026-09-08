@@ -197,8 +197,9 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
+                    # AQUÍ SE ACTUALIZÓ EL MODELO A gemini-3.6-flash
                     response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.6-flash",
                         contents=prompt_completo,
                     )
                     
