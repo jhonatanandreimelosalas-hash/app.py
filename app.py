@@ -38,7 +38,7 @@ INTEGRANTES_LISTA = [
     "Iván Santiago Valencia Villamil"
 ]
 
-# --- INICIALIZAR ESTADO DE DATOS Y VIP EN SESSION_STATE ---
+# --- INICIALIZAR ESTADO DE DATOS Y ZONA DE HONOR EN SESSION_STATE ---
 if 'ingresos_df' not in st.session_state:
     st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones"])
 
@@ -46,7 +46,7 @@ if 'gastos_df' not in st.session_state:
     st.session_state.gastos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor", "Responsable"])
 
 if 'vip_df' not in st.session_state:
-    st.session_state.vip_df = pd.DataFrame(columns=["Fecha", "Asistente", "Codigo VIP", "Monto Aporte", "Estado"])
+    st.session_state.vip_df = pd.DataFrame(columns=["Fecha", "Asistente", "Código Único", "Monto Aporte", "Estado", "Insignia", "Atención Preferencial", "Kit Entregado"])
 
 if 'ia_abierta' not in st.session_state:
     st.session_state.ia_abierta = False
@@ -56,7 +56,7 @@ def guardar_todo_en_excel():
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         st.session_state.ingresos_df.to_excel(writer, sheet_name='Registro de Ingresos', index=False)
         st.session_state.gastos_df.to_excel(writer, sheet_name='Registro de Gastos', index=False)
-        st.session_state.vip_df.to_excel(writer, sheet_name='Registro VIP', index=False)
+        st.session_state.vip_df.to_excel(writer, sheet_name='Asistentes de Honor', index=False)
     
     try:
         wb = openpyxl.load_workbook(EXCEL_FILE)
@@ -161,7 +161,7 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "4. Balance Financiero", 
     "5. Dashboard y Gráficos", 
     "6. Anexo de Recibos & QR", 
-    "7. Zona VIP / Premium 🌟", 
+    "7. Zona de Honor / Preferencial 🌟", 
     "8. Reporte Final"
 ])
 st.sidebar.markdown("---")
@@ -196,7 +196,6 @@ if st.session_state.ia_abierta:
                 try:
                     from google import genai
                     
-                    # Inicializar cliente con la nueva librería google-genai
                     client = genai.Client(api_key=api_key_input)
                     
                     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
@@ -206,9 +205,8 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    # Llamada configurada con el modelo gemini-3.6-flash
                     response = client.models.generate_content(
-                        model="gemini-3.6-flash",
+                        model="gemini-2.5-flash",
                         contents=prompt_completo,
                     )
                     
@@ -475,53 +473,120 @@ elif menu == "6. Anexo de Recibos & QR":
                 mime="image/png"
             )
 
-# --- 7. ZONA VIP / PREMIUM ---
-elif menu == "7. Zona VIP / Premium 🌟":
-    st.markdown('<p class="main-header">🌟 Módulo Exclusivo VIP / Premium</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Gestión de accesos y control protegido por contraseña</p>', unsafe_allow_html=True)
+# --- 7. ZONA DE HONOR / PREFERENCIAL 🌟 ---
+elif menu == "7. Zona de Honor / Preferencial 🌟":
+    st.markdown('<p class="main-header">🌟 Módulo de Zona de Honor y Pases Preferenciales</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Gestión de accesos selectos, acreditaciones y control protegido</p>', unsafe_allow_html=True)
     st.markdown("---")
 
-    pwd_input = st.text_input("Introduce la contraseña de acceso VIP:", type="password")
+    pwd_input = st.text_input("Introduce la contraseña de acceso preferencial:", type="password")
     
     if pwd_input == "Colegio2026*VIP":
-        st.success("🔓 ¡Contraseña correcta! Acceso concedido al Módulo VIP.")
+        st.success("🔓 ¡Contraseña correcta! Acceso concedido al Módulo de Honor.")
         
-        with st.expander("➕ Registrar Nuevo Ingreso VIP", expanded=True):
-            with st.form("form_vip"):
+        if 'vip_df' not in st.session_state or 'Insignia' not in st.session_state.vip_df.columns:
+            st.session_state.vip_df = pd.DataFrame(columns=[
+                "Fecha", "Asistente", "Código Único", "Monto Aporte", "Estado", "Insignia", "Atención Preferencial", "Kit Entregado"
+            ])
+
+        with st.expander("➕ Generar Nueva Acreditación / Pase Preferencial", expanded=True):
+            with st.form("form_zona_honor"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    f_vip = st.date_input("Fecha VIP", value=datetime.now())
-                    nombre_asistente = st.text_input("Nombre del Asistente / Patrocinador VIP")
+                    f_reg = st.date_input("Fecha de Registro", value=datetime.now())
+                    nombre_asistente = st.text_input("Nombre del Invitado / Aliado de Honor")
+                    codigo_unico = st.text_input("Código Único de Acceso", value="HONOR-001")
+                    monto_aporte = st.number_input("Aporte / Donación ($)", min_value=0.0, step=5000.0)
                 with c2:
-                    codigo_vip = st.text_input("Código de Validación VIP (ej. VIP-999)", value="VIP-001")
-                    monto_vip = st.number_input("Monto de Aporte VIP ($)", min_value=0.0, step=5000.0)
+                    estado_acceso = st.selectbox("Estado de Acreditación", ["Acceso Confirmado", "Pendiente de Confirmación", "Cortesía Institucional"])
+                    insignia = st.selectbox("Insignia Visual Interactiva", ["🌟 Invitado de Honor", "🏅 Patrocinador Principal", "⭐ Aliado Estratégico"])
+                    ubicacion_preferencial = st.selectbox("Ubicación Preferencial", ["Primera Fila - Central", "Palco de Honor", "Zona Lounge"])
+                    kit_entregado = st.checkbox("Kit institucional entregado")
                 
-                btn_guardar_vip = st.form_submit_button("Guardar Registro VIP")
-                if btn_guardar_vip:
+                observaciones_honor = st.text_area("Restricciones o necesidades especiales / Observaciones")
+                
+                btn_guardar_honor = st.form_submit_button("Generar y Guardar Acreditación")
+                if btn_guardar_honor:
                     if nombre_asistente.strip() == "":
-                        st.error("El nombre no puede estar vacío.")
+                        st.error("El nombre del asistente no puede estar vacío.")
                     else:
-                        nuevo_vip = {
-                            "Fecha": f_vip.strftime("%Y-%m-%d"),
+                        nuevo_honor = {
+                            "Fecha": f_reg.strftime("%Y-%m-%d"),
                             "Asistente": nombre_asistente,
-                            "Codigo VIP": codigo_vip,
-                            "Monto Aporte": float(monto_vip),
-                            "Estado": "Activo"
+                            "Código Único": codigo_unico,
+                            "Monto Aporte": float(monto_aporte),
+                            "Estado": estado_acceso,
+                            "Insignia": insignia,
+                            "Atención Preferencial": f"{ubicacion_preferencial} | Kit: {'Sí' if kit_entregado else 'No'}",
+                            "Kit Entregado": "Sí" if kit_entregado else "No"
                         }
-                        st.session_state.vip_df = pd.concat([st.session_state.vip_df, pd.DataFrame([nuevo_vip])], ignore_index=True)
+                        st.session_state.vip_df = pd.concat([st.session_state.vip_df, pd.DataFrame([nuevo_honor])], ignore_index=True)
                         guardar_todo_en_excel()
-                        st.success("¡Registro VIP agregado exitosamente!")
+                        st.success("¡Pase preferencial e insignia generados exitosamente!")
                         st.rerun()
 
-        st.markdown("### 📋 Listado de Registros VIP")
+        st.markdown("---")
+        st.markdown("### 🔍 Buscador Instantáneo y Filtros de Acreditados")
+        
         if not st.session_state.vip_df.empty:
-            st.dataframe(st.session_state.vip_df, use_container_width=True)
-            total_vip = st.session_state.vip_df["Monto Aporte"].astype(float).sum()
-            st.metric("💎 TOTAL RECAUDADO VIP", f"${total_vip:,.0f} COP")
+            b_col1, b_col2 = st.columns(2)
+            with b_col1:
+                texto_busqueda = st.text_input("🔍 Buscar por nombre o código único:")
+            with b_col2:
+                filtro_estado = st.selectbox("Filtrar por Estado de Acreditación:", ["Todos", "Acceso Confirmado", "Pendiente de Confirmación", "Cortesía Institucional"])
+            
+            df_filtrado_honor = st.session_state.vip_df.copy()
+            if texto_busqueda.strip() != "":
+                df_filtrado_honor = df_filtrado_honor[
+                    df_filtrado_honor["Asistente"].str.contains(texto_busqueda, case=False, na=False) |
+                    df_filtrado_honor["Código Único"].str.contains(texto_busqueda, case=False, na=False)
+                ]
+            if filtro_estado != "Todos":
+                df_filtrado_honor = df_filtrado_honor[df_filtrado_honor["Estado"] == filtro_estado]
+
+            st.dataframe(df_filtrado_honor, use_container_width=True)
+            
+            st.markdown("#### 📊 Indicadores de Impacto Selecto")
+            total_recaudado_honor = st.session_state.vip_df["Monto Aporte"].astype(float).sum()
+            total_asistentes_honor = len(st.session_state.vip_df)
+            
+            tot_ing_general = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 1.0
+            porcentaje_aporte = (total_recaudado_honor / tot_ing_general) * 100 if tot_ing_general > 0 else 0
+
+            ind_c1, ind_c2, ind_c3 = st.columns(3)
+            ind_c1.metric("💎 Total Aportes de Honor", f"${total_recaudado_honor:,.0f} COP")
+            ind_c2.metric("👥 Acreditaciones Activas", f"{total_asistentes_honor} Pases")
+            ind_c3.metric("📈 Impacto en Presupuesto", f"{porcentaje_aporte:.1f}%")
+
+            st.markdown("---")
+            st.markdown("#### 📥 Exportar Listado de Honor")
+            output_buffer = BytesIO()
+            with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
+                st.session_state.vip_df.to_excel(writer, sheet_name='Asistentes de Honor', index=False)
+            output_buffer.seek(0)
+            
+            st.download_button(
+                label="📥 Descargar Reporte Exclusivo de Asistentes (Excel)",
+                data=output_buffer,
+                file_name=f"Reporte_Asistentes_Honor_{datetime.now().strftime('%Y-%m-%d')}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+            st.markdown("---")
+            st.markdown("### 🗑️ Gestionar o Depurar Pases")
+            opciones_borrar_h = [f"Fila {idx}: {row['Asistente']} - Código: {row['Código Único']}" for idx, row in st.session_state.vip_df.iterrows()]
+            item_a_borrar_h = st.selectbox("Selecciona el registro a retirar:", opciones_borrar_h)
+            
+            if st.button("❌ Retirar Acreditación Seleccionada"):
+                idx_real_h = int(item_a_borrar_h.split("Fila ")[1].split(":")[0])
+                st.session_state.vip_df = st.session_state.vip_df.drop(idx_real_h).reset_index(drop=True)
+                guardar_todo_en_excel()
+                st.success("¡Registro retirado correctamente!")
+                st.rerun()
         else:
-            st.info("Aún no hay registros en la zona VIP.")
+            st.info("Aún no hay pases registrados en la Zona de Honor.")
     else:
-        st.warning("🔒 Esta sección está protegida. Ingresa la contraseña de organizador para desbloquear el contenido VIP.")
+        st.warning("🔒 Esta sección está protegida. Ingresa la contraseña correcta para desbloquear el módulo de acceso preferencial.")
 
 # --- 8. REPORTE FINAL ---
 elif menu == "8. Reporte Final":
