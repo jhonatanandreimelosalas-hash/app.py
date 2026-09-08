@@ -161,7 +161,7 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "4. Balance Financiero", 
     "5. Dashboard y Gráficos", 
     "6. Anexo de Recibos & QR", 
-    "7. Zona VIP / Premium 🌟",  # <--- NUEVA SECCIÓN VIP
+    "7. Zona VIP / Premium 🌟", 
     "8. Reporte Final"
 ])
 st.sidebar.markdown("---")
@@ -194,8 +194,9 @@ if st.session_state.ia_abierta:
         if st.button("Consultar IA"):
             if api_key_input.strip() != "":
                 try:
-                    from google import genai
-                    client = genai.Client(api_key=api_key_input)
+                    import google.generativeai as genai
+                    genai.configure(api_key=api_key_input)
+                    
                     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
                     tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
                     saldo = tot_ing - tot_gas
@@ -203,10 +204,9 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del evento Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt_completo,
-                    )
+                    model = genai.GenerativeModel("gemini-1.5-flash")
+                    response = model.generate_content(prompt_completo)
+                    
                     st.success("Respuesta:")
                     st.write(response.text)
                 except Exception as e:
@@ -476,7 +476,6 @@ elif menu == "7. Zona VIP / Premium 🌟":
     st.markdown('<p class="sub-header">Gestión de accesos y control protegido por contraseña</p>', unsafe_allow_html=True)
     st.markdown("---")
 
-    # Sistema de contraseña para entrar al contenido VIP
     pwd_input = st.text_input("Introduce la contraseña de acceso VIP:", type="password")
     
     if pwd_input == "Colegio2026*VIP":
@@ -538,4 +537,3 @@ elif menu == "8. Reporte Final":
     guardar_todo_en_excel()
     with open(EXCEL_FILE, "rb") as f:
         st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    
