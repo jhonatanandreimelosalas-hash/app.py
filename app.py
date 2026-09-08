@@ -31,10 +31,9 @@ st.markdown("""
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 
 INTEGRANTES_LISTA = [
-    "Jhonattan Andrei Melo Salas",
-    "Nicol Stefani Vanegas Cruz",
-    "Luis Alejandro Martínez Rubio",
-    "Iván Santiago Valencia Villamil"
+    "Saray Medina",
+    "Sahra Sofia Águila Vargas",
+    "Shara Aguilar"
 ]
 
 # --- INICIALIZAR ESTADO DE DATOS ---
@@ -198,7 +197,7 @@ if st.session_state.ia_abierta:
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
                     response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.8-flash",
                         contents=prompt_completo,
                     )
                     
@@ -225,10 +224,9 @@ if menu == "1. Inicio":
     st.markdown("---")
     st.markdown("### 👥 Equipo de Trabajo - Proyecto de Vida")
     integrantes_data = [
-        {"N.°": 1, "Nombre Completo": "Jhonattan Andrei Melo Salas", "Rol / Responsabilidad": "Dirección General y Arquitectura"},
-        {"N.°": 2, "Nombre Completo": "Nicol Stefani Vanegas Cruz", "Rol / Responsabilidad": "Optimización y Cálculos Avanzados"},
-        {"N.°": 3, "Nombre Completo": "Luis Alejandro Martínez Rubio", "Rol / Responsabilidad": "Desarrollo de Módulos y Analítica"},
-        {"N.°": 4, "Nombre Completo": "Iván Santiago Valencia Villamil", "Rol / Responsabilidad": "Soporte y Validación de Datos"}
+        {"N.°": 1, "Nombre Completo": "Saray Medina", "Rol / Responsabilidad": "Dirección General y Estudiante Principal"},
+        {"N.°": 2, "Nombre Completo": "Sahra Sofia Águila Vargas", "Rol / Responsabilidad": "Optimización y Cálculos Avanzados"},
+        {"N.°": 3, "Nombre Completo": "Shara Aguilar", "Rol / Responsabilidad": "Desarrollo de Módulos y Analítica"}
     ]
     st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
 
@@ -484,4 +482,3 @@ elif menu == "7. Reporte Final":
     guardar_todo_en_excel()
     with open(EXCEL_FILE, "rb") as f:
         st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        
