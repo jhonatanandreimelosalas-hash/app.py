@@ -187,8 +187,15 @@ if st.session_state.ia_abierta:
         
         if st.button("Consultar IA"):
             api_key_efectiva = api_key_input.strip() or os.environ.get("GEMINI_API_KEY", "")
-            if api_key_efectiva:
+            
+            # Validación estricta para evitar que coja credenciales erróneas de Google Cloud
+            if not api_key_efectiva.startswith("AIza"):
+                st.error("⚠️ Debes introducir una Clave de API válida de Google AI Studio (empieza por 'AIza').")
+            else:
                 try:
+                    # Fijamos explícitamente la variable de entorno para forzar autenticación por API Key limpia
+                    os.environ["GEMINI_API_KEY"] = api_key_efectiva
+                    
                     from google import genai
                     client = genai.Client(api_key=api_key_efectiva)
                     
@@ -199,7 +206,6 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    # Corrección del nombre del modelo a uno válido ("gemini-2.5-flash" o similar)
                     response = client.models.generate_content(
                         model="gemini-2.5-flash",
                         contents=prompt_completo,
@@ -209,8 +215,6 @@ if st.session_state.ia_abierta:
                     st.write(response.text)
                 except Exception as e:
                     st.error(f"Error: {e}")
-            else:
-                st.warning("⚠️ Ingresa tu API Key o configura la variable de entorno GEMINI_API_KEY.")
 
 # --- 1. INICIO ---
 if menu == "1. Inicio":
