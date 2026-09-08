@@ -30,12 +30,11 @@ st.markdown("""
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
+# Integrantes reales del proyecto (sin nombres ajenos)
 INTEGRANTES_LISTA = [
-    "Saray Medina",
     "Ivan Santiago Valencia Villamil",
     "Nicol Vanegas Cruz",
-    "Sahra Sofia Águila Vargas",
-    "Shara Aguilar",
+    "Jhonatan Andrey Melo",
     "Alejandro Martinez Rubio"
 ]
 
@@ -81,12 +80,10 @@ def guardar_todo_en_excel():
 
 # --- FUNCIÓN PARA GENERAR IMAGEN DE RECIBO DECORADA ---
 def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
-    # Crear un lienzo en blanco de 650x850 píxeles con fondo blanco limpio
     img_w, img_h = 650, 880
     base_img = Image.new("RGB", (img_w, img_h), color="#FFFFFF")
     draw = ImageDraw.Draw(base_img)
     
-    # Intentar cargar fuentes estándar de sistema o usar por defecto
     try:
         font_title = ImageFont.truetype("arial.ttf", 22)
         font_bold = ImageFont.truetype("arialbd.ttf", 15)
@@ -95,15 +92,14 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     except IOError:
         font_title = font_bold = font_regular = font_small = ImageFont.load_default()
 
-    # Franja superior institucional (Color Azul Oscuro)
+    # Franja superior institucional
     draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
     draw.text((30, 25), "COLEGIO FRANCISCO DE PAULA SANTANDER", fill="#FFFFFF", font=font_title)
     draw.text((30, 60), "Comprobante General de Balance Financiero", fill="#93C5FD", font=font_regular)
     
-    # Cuadro contenedor principal con borde elegante
+    # Cuadro contenedor principal
     draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
     
-    # Datos de Metadatos del Recibo
     draw.text((55, 160), f"ID de Comprobante:", fill="#64748B", font=font_small)
     draw.text((200, 158), f"{rec_id}", fill="#1E293B", font=font_bold)
     
@@ -111,12 +107,10 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     draw.text((200, 188), f"{fecha}", fill="#1E293B", font=font_bold)
 
     draw.text((55, 220), f"Institución:", fill="#64748B", font=font_small)
-    draw.text((200, 218), f"Proyecto de Vida - Eventos", fill="#1E293B", font=font_bold)
+    draw.text((200, 218), f"Colegio Francisco de Paula Santander", fill="#1E293B", font=font_bold)
     
-    # Línea divisoria
     draw.line([(55, 255), (img_w - 55, 255)], fill="#CBD5E1", width=1)
     
-    # Sección de Valores Financieros
     draw.text((55, 280), "RESUMEN DE MOVIMIENTOS", fill="#1E3A8A", font=font_bold)
     
     draw.text((55, 320), "(+) Total Ingresos:", fill="#334155", font=font_regular)
@@ -125,7 +119,6 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     draw.text((55, 360), "(-) Total Gastos:", fill="#334155", font=font_regular)
     draw.text((400, 360), f"${tot_gas:,.0f} COP", fill="#DC2626", font=font_bold)
     
-    # Línea divisoria de saldo
     draw.line([(55, 400), (img_w - 55, 400)], fill="#CBD5E1", width=1)
     
     draw.text((55, 420), "BALANCE NETO FINAL:", fill="#1E3A8A", font=font_bold)
@@ -135,17 +128,14 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     estado_txt = "ESTADO: APROBADO (SUPERÁVIT)" if saldo >= 0 else "ESTADO: ALERTA (DÉFICIT)"
     draw.text((55, 465), estado_txt, fill=color_saldo, font=font_small)
 
-    # Pegar el Código QR centrado en la parte inferior
     qr_resized = qr_img_pil.resize((180, 180))
     base_img.paste(qr_resized, (int((img_w - 180) / 2), 510))
     
-    # Texto de pie de página debajo del QR
     draw.text((int(img_w / 2) - 130, 710), "Escanea este código QR para validar", fill="#64748B", font=font_small)
     draw.text((int(img_w / 2) - 120, 730), "la información general del balance", fill="#64748B", font=font_small)
     
     draw.text((int(img_w / 2) - 110, 800), "Sistema Automático de Gestión Financiera", fill="#94A3B8", font=font_small)
 
-    # Guardar en buffer de memoria
     buffer_img = BytesIO()
     base_img.save(buffer_img, format="PNG")
     buffer_img.seek(0)
@@ -199,12 +189,10 @@ if menu == "1. Inicio":
     st.markdown("---")
     st.markdown("### 👥 Equipo de Trabajo")
     integrantes_data = [
-        {"N.°": 1, "Nombre Completo": "Saray Medina", "Rol / Responsabilidad": "Estudiante Titular / Proyecto de Vida"},
-        {"N.°": 2, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
-        {"N.°": 3, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
-        {"N.°": 4, "Nombre Completo": "Sahra Sofia Águila Vargas", "Rol / Responsabilidad": "Control de Gastos e Insumos"},
-        {"N.°": 5, "Nombre Completo": "Shara Aguilar", "Rol / Responsabilidad": "Apoyo Logístico"},
-        {"N.°": 6, "Nombre Completo": "Alejandro Martinez Rubio", "Rol / Responsabilidad": "Soportes y Control de Balance"},
+        {"N.°": 1, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
+        {"N.°": 2, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
+        {"N.°": 3, "Nombre Completo": "Jhonatan Andrey Melo", "Rol / Responsabilidad": "Control de Gastos e Insumos"},
+        {"N.°": 4, "Nombre Completo": "Alejandro Martinez Rubio", "Rol / Responsabilidad": "Soportes y Control de Balance"},
     ]
     st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
 
@@ -389,16 +377,13 @@ elif menu == "6. Anexo de Recibos & QR":
             f"Estado: {'Aprobado (Superávit)' if saldo >= 0 else 'Alerta (Déficit)'}"
         )
         
-        # Generar QR en Pillow
         qr = qrcode.QRCode(box_size=10, border=2)
         qr.add_data(texto_recibo)
         qr.make(fit=True)
         img_qr_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         
-        # Crear la imagen decorada del recibo
         img_recibo_buffer = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, img_qr_pil)
         
-        # Guardar en session_state para mostrar en pantalla y descargar
         st.session_state.rec_id = rec_id
         st.session_state.rec_img_bytes = img_recibo_buffer.getvalue()
         st.success("¡Comprobante e imagen decorada generados exitosamente!")
