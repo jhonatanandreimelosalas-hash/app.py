@@ -11,7 +11,7 @@ import plotly.express as px
 
 # Configuración inicial de la página
 st.set_page_config(
-    page_title="Gestión Financiera - Prototipo Eventos", 
+    page_title="Gestión Financiera - Prototipo Avanzado", 
     page_icon="💰", 
     layout="wide",
     initial_sidebar_state="expanded"
@@ -28,9 +28,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
+EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 
-# Integrantes reales del proyecto (Colegio Francisco de Paula Santander - Solo los primeros 4)
 INTEGRANTES_LISTA = [
     "Jhonattan Andrei Melo Salas",
     "Nicol Stefani Vanegas Cruz",
@@ -38,25 +37,20 @@ INTEGRANTES_LISTA = [
     "Iván Santiago Valencia Villamil"
 ]
 
-# --- INICIALIZAR ESTADO DE DATOS Y VIP EN SESSION_STATE ---
+# --- INICIALIZAR ESTADO DE DATOS ---
 if 'ingresos_df' not in st.session_state:
     st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones"])
 
 if 'gastos_df' not in st.session_state:
     st.session_state.gastos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor", "Responsable"])
 
-if 'vip_df' not in st.session_state:
-    st.session_state.vip_df = pd.DataFrame(columns=["Fecha", "Asistente", "Codigo VIP", "Monto Aporte", "Estado"])
-
 if 'ia_abierta' not in st.session_state:
     st.session_state.ia_abierta = False
 
 def guardar_todo_en_excel():
-    """Sincroniza los DataFrames actuales con el archivo Excel manteniendo el formato"""
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         st.session_state.ingresos_df.to_excel(writer, sheet_name='Registro de Ingresos', index=False)
         st.session_state.gastos_df.to_excel(writer, sheet_name='Registro de Gastos', index=False)
-        st.session_state.vip_df.to_excel(writer, sheet_name='Registro VIP', index=False)
     
     try:
         wb = openpyxl.load_workbook(EXCEL_FILE)
@@ -105,14 +99,14 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     
     draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
     
-    draw.text((55, 160), f"ID de Comprobante:", fill="#64748B", font=font_small)
+    draw.text((55, 160), "ID de Comprobante:", fill="#64748B", font=font_small)
     draw.text((200, 158), f"{rec_id}", fill="#1E293B", font=font_bold)
     
-    draw.text((55, 190), f"Fecha de Emisión:", fill="#64748B", font=font_small)
+    draw.text((55, 190), "Fecha de Emisión:", fill="#64748B", font=font_small)
     draw.text((200, 188), f"{fecha}", fill="#1E293B", font=font_bold)
 
-    draw.text((55, 220), f"Institución:", fill="#64748B", font=font_small)
-    draw.text((200, 218), f"Colegio Francisco de Paula Santander", fill="#1E293B", font=font_bold)
+    draw.text((55, 220), "Institución:", fill="#64748B", font=font_small)
+    draw.text((200, 218), "Colegio Francisco de Paula Santander", fill="#1E293B", font=font_bold)
     
     draw.line([(55, 255), (img_w - 55, 255)], fill="#CBD5E1", width=1)
     
@@ -161,8 +155,7 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "4. Balance Financiero", 
     "5. Dashboard y Gráficos", 
     "6. Anexo de Recibos & QR", 
-    "7. Zona VIP / Premium 🌟", 
-    "8. Reporte Final"
+    "7. Reporte Final"
 ])
 st.sidebar.markdown("---")
 
@@ -179,7 +172,7 @@ try:
 except Exception:
     pass
 
-# --- APARTADO DE IA EN EL BORDE (SIDEBAR INFERIOR / FLOTANTE) ---
+# --- APARTADO DE IA EN EL BORDE ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("🤖 **Asistente IA del Borde**")
 if st.sidebar.button("💬 Abrir / Cerrar Asistente IA"):
@@ -195,8 +188,6 @@ if st.session_state.ia_abierta:
             if api_key_input.strip() != "":
                 try:
                     from google import genai
-                    
-                    # Inicializar cliente con la nueva librería google-genai
                     client = genai.Client(api_key=api_key_input)
                     
                     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
@@ -206,9 +197,8 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    # Llamada configurada con el modelo gemini-3.6-flash
                     response = client.models.generate_content(
-                        model="gemini-3.6-flash",
+                        model="gemini-2.5-flash",
                         contents=prompt_completo,
                     )
                     
@@ -222,7 +212,7 @@ if st.session_state.ia_abierta:
 # --- 1. INICIO ---
 if menu == "1. Inicio":
     st.markdown('<p class="main-header">🏛️ Proyecto de Control y Gestión Financiera</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Plataforma centralizada para la administración y supervisión de recursos en eventos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Plataforma centralizada para la administración y supervisión de recursos</p>', unsafe_allow_html=True)
     st.markdown("---")
     
     col1, col2 = st.columns([2, 1])
@@ -235,10 +225,10 @@ if menu == "1. Inicio":
     st.markdown("---")
     st.markdown("### 👥 Equipo de Trabajo - Proyecto de Vida")
     integrantes_data = [
-        {"N.°": 1, "Nombre Completo": "Jhonattan Andrei Melo Salas", "Rol / Responsabilidad": "Estudiante Responsable / Dirección"},
-        {"N.°": 2, "Nombre Completo": "Nicol Stefani Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registros y Finanzas"},
-        {"N.°": 3, "Nombre Completo": "Luis Alejandro Martínez Rubio", "Rol / Responsabilidad": "Control de Insumos y Gastos"},
-        {"N.°": 4, "Nombre Completo": "Iván Santiago Valencia Villamil", "Rol / Responsabilidad": "Soporte Técnico y Balances"},
+        {"N.°": 1, "Nombre Completo": "Jhonattan Andrei Melo Salas", "Rol / Responsabilidad": "Dirección General y Arquitectura"},
+        {"N.°": 2, "Nombre Completo": "Nicol Stefani Vanegas Cruz", "Rol / Responsabilidad": "Optimización y Cálculos Avanzados"},
+        {"N.°": 3, "Nombre Completo": "Luis Alejandro Martínez Rubio", "Rol / Responsabilidad": "Desarrollo de Módulos y Analítica"},
+        {"N.°": 4, "Nombre Completo": "Iván Santiago Valencia Villamil", "Rol / Responsabilidad": "Soporte y Validación de Datos"}
     ]
     st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
 
@@ -253,7 +243,7 @@ elif menu == "2. Registro de Ingresos":
             c1, c2 = st.columns(2)
             with c1:
                 f_ing = st.date_input("Fecha", value=datetime.now())
-                con_ing = st.text_input("Concepto (ej. Venta de boletería)")
+                con_ing = st.text_input("Concepto")
             with c2:
                 resp_ing = st.selectbox("Responsable", INTEGRANTES_LISTA)
                 val_ing = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
@@ -302,12 +292,12 @@ elif menu == "2. Registro de Ingresos":
             st.success("¡Ingreso eliminado correctamente!")
             st.rerun()
     else:
-        st.info("No hay ingresos registrados todavía. Usa el formulario de arriba para agregar uno.")
+        st.info("No hay ingresos registrados todavía.")
 
 # --- 3. REGISTRO DE GASTOS ---
 elif menu == "3. Registro de Gastos":
     st.markdown('<p class="main-header">📉 Registro de Gastos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Controla los egresos y compras del evento con alertas de presupuesto</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Controla los egresos y compras con alertas de presupuesto</p>', unsafe_allow_html=True)
     st.markdown("---")
     
     current_total_gastos = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
@@ -321,7 +311,7 @@ elif menu == "3. Registro de Gastos":
             c1, c2 = st.columns(2)
             with c1:
                 f_gas = st.date_input("Fecha Gasto", value=datetime.now())
-                con_gas = st.text_input("Concepto (ej. Alquiler de sonido)")
+                con_gas = st.text_input("Concepto")
                 cat_gas = st.selectbox("Categoría", ["Logística", "Publicidad", "Alimentación", "Varios"])
             with c2:
                 val_gas = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
@@ -374,7 +364,7 @@ elif menu == "3. Registro de Gastos":
             st.success("¡Gasto eliminado correctamente!")
             st.rerun()
     else:
-        st.info("No hay gastos registrados todavía. Usa el formulario de arriba para agregar uno.")
+        st.info("No hay gastos registrados todavía.")
 
 # --- 4. BALANCE FINANCIERO ---
 elif menu == "4. Balance Financiero":
@@ -466,7 +456,7 @@ elif menu == "6. Anexo de Recibos & QR":
             st.image(st.session_state.rec_img_bytes, caption=f"Comprobante {st.session_state.rec_id}", use_container_width=True)
         with col_prev2:
             st.markdown("#### Opciones de Descarga")
-            st.write("Puedes guardar este recibo directamente en tu dispositivo como una imagen PNG decorada para enviarla por WhatsApp o imprimirla.")
+            st.write("Puedes guardar este recibo directamente en tu dispositivo como una imagen PNG decorada.")
             
             st.download_button(
                 label="📥 Descargar Recibo como Imagen PNG",
@@ -475,57 +465,9 @@ elif menu == "6. Anexo de Recibos & QR":
                 mime="image/png"
             )
 
-# --- 7. ZONA VIP / PREMIUM ---
-elif menu == "7. Zona VIP / Premium 🌟":
-    st.markdown('<p class="main-header">🌟 Módulo Exclusivo VIP / Premium</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Gestión de accesos y control protegido por contraseña</p>', unsafe_allow_html=True)
-    st.markdown("---")
-
-    pwd_input = st.text_input("Introduce la contraseña de acceso VIP:", type="password")
-    
-    if pwd_input == "Colegio2026*VIP":
-        st.success("🔓 ¡Contraseña correcta! Acceso concedido al Módulo VIP.")
-        
-        with st.expander("➕ Registrar Nuevo Ingreso VIP", expanded=True):
-            with st.form("form_vip"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    f_vip = st.date_input("Fecha VIP", value=datetime.now())
-                    nombre_asistente = st.text_input("Nombre del Asistente / Patrocinador VIP")
-                with c2:
-                    codigo_vip = st.text_input("Código de Validación VIP (ej. VIP-999)", value="VIP-001")
-                    monto_vip = st.number_input("Monto de Aporte VIP ($)", min_value=0.0, step=5000.0)
-                
-                btn_guardar_vip = st.form_submit_button("Guardar Registro VIP")
-                if btn_guardar_vip:
-                    if nombre_asistente.strip() == "":
-                        st.error("El nombre no puede estar vacío.")
-                    else:
-                        nuevo_vip = {
-                            "Fecha": f_vip.strftime("%Y-%m-%d"),
-                            "Asistente": nombre_asistente,
-                            "Codigo VIP": codigo_vip,
-                            "Monto Aporte": float(monto_vip),
-                            "Estado": "Activo"
-                        }
-                        st.session_state.vip_df = pd.concat([st.session_state.vip_df, pd.DataFrame([nuevo_vip])], ignore_index=True)
-                        guardar_todo_en_excel()
-                        st.success("¡Registro VIP agregado exitosamente!")
-                        st.rerun()
-
-        st.markdown("### 📋 Listado de Registros VIP")
-        if not st.session_state.vip_df.empty:
-            st.dataframe(st.session_state.vip_df, use_container_width=True)
-            total_vip = st.session_state.vip_df["Monto Aporte"].astype(float).sum()
-            st.metric("💎 TOTAL RECAUDADO VIP", f"${total_vip:,.0f} COP")
-        else:
-            st.info("Aún no hay registros en la zona VIP.")
-    else:
-        st.warning("🔒 Esta sección está protegida. Ingresa la contraseña de organizador para desbloquear el contenido VIP.")
-
-# --- 8. REPORTE FINAL ---
-elif menu == "8. Reporte Final":
-    st.markdown('<p class="main-header">📑 Reporte Final del Evento</p>', unsafe_allow_html=True)
+# --- 7. REPORTE FINAL ---
+elif menu == "7. Reporte Final":
+    st.markdown('<p class="main-header">📑 Reporte Final</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Consolidado general y descarga</p>', unsafe_allow_html=True)
     st.markdown("---")
     
@@ -541,4 +483,5 @@ elif menu == "8. Reporte Final":
     st.markdown("---")
     guardar_todo_en_excel()
     with open(EXCEL_FILE, "rb") as f:
-        st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
