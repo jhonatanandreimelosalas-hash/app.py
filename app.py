@@ -30,12 +30,12 @@ st.markdown("""
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
-# Integrantes reales del proyecto (Colegio Francisco de Paula Santander)
+# Integrantes reales del proyecto (Colegio Francisco de Paula Santander - Solo los primeros 4)
 INTEGRANTES_LISTA = [
-    "Saray Medina",
-    "sahra sofia águila vargas",
-    "shara Aguilar",
-    "Ivan Santiago Valencia Villamil"
+    "Jhonattan Andrei Melo Salas",
+    "Nicol Stefani Vanegas Cruz",
+    "Luis Alejandro Martínez Rubio",
+    "Iván Santiago Valencia Villamil"
 ]
 
 # --- INICIALIZAR ESTADO DE DATOS Y VIP EN SESSION_STATE ---
@@ -235,10 +235,10 @@ if menu == "1. Inicio":
     st.markdown("---")
     st.markdown("### 👥 Equipo de Trabajo - Proyecto de Vida")
     integrantes_data = [
-        {"N.°": 1, "Nombre Completo": "Saray Medina", "Rol / Responsabilidad": "Estudiante Responsable / Dirección"},
-        {"N.°": 2, "Nombre Completo": "sahra sofia águila vargas", "Rol / Responsabilidad": "Gestión de Registros y Finanzas"},
-        {"N.°": 3, "Nombre Completo": "shara Aguilar", "Rol / Responsabilidad": "Control de Insumos y Gastos"},
-        {"N.°": 4, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Soporte Técnico y Balances"},
+        {"N.°": 1, "Nombre Completo": "Jhonattan Andrei Melo Salas", "Rol / Responsabilidad": "Estudiante Responsable / Dirección"},
+        {"N.°": 2, "Nombre Completo": "Nicol Stefani Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registros y Finanzas"},
+        {"N.°": 3, "Nombre Completo": "Luis Alejandro Martínez Rubio", "Rol / Responsabilidad": "Control de Insumos y Gastos"},
+        {"N.°": 4, "Nombre Completo": "Iván Santiago Valencia Villamil", "Rol / Responsabilidad": "Soporte Técnico y Balances"},
     ]
     st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
 
@@ -439,7 +439,6 @@ elif menu == "6. Anexo de Recibos & QR":
             f"ID: {rec_id}\n"
             f"Fecha de Emisión: {fecha_actual}\n"
             f"Institución: Colegio Francisco de Paula Santander\n"
-            f"Estudiante: Saray Medina\n"
             f"--------------------------------------\n"
             f"Total Ingresos: ${tot_ing:,.0f} COP\n"
             f"Total Gastos: ${tot_gas:,.0f} COP\n"
