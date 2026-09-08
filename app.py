@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS modernos y personalizados (incluyendo el botón flotante de la IA en el borde)
+# Estilos CSS modernos y personalizados
 st.markdown("""
     <style>
         .main-header { font-size: 2.3rem; color: #1E3A8A; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }
@@ -30,12 +30,12 @@ st.markdown("""
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
-# Integrantes reales del proyecto
+# Integrantes reales del proyecto (Colegio Francisco de Paula Santander)
 INTEGRANTES_LISTA = [
-    "Ivan Santiago Valencia Villamil",
-    "Nicol Vanegas Cruz",
-    "Jhonatan Andrey Melo",
-    "Alejandro Martinez Rubio"
+    "Saray Medina",
+    "sahra sofia águila vargas",
+    "shara Aguilar",
+    "Ivan Santiago Valencia Villamil"
 ]
 
 # --- INICIALIZAR ESTADO DE DATOS Y VIP EN SESSION_STATE ---
@@ -194,18 +194,23 @@ if st.session_state.ia_abierta:
         if st.button("Consultar IA"):
             if api_key_input.strip() != "":
                 try:
-                    import google.generativeai as genai
-                    genai.configure(api_key=api_key_input)
+                    from google import genai
+                    
+                    # Inicializar cliente con la nueva librería google-genai
+                    client = genai.Client(api_key=api_key_input)
                     
                     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
                     tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
                     saldo = tot_ing - tot_gas
                     
-                    contexto = f"Datos del evento Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
+                    contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    model = genai.GenerativeModel("gemini-1.5-flash")
-                    response = model.generate_content(prompt_completo)
+                    # Llamada corregida para google-genai
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt_completo,
+                    )
                     
                     st.success("Respuesta:")
                     st.write(response.text)
@@ -223,17 +228,17 @@ if menu == "1. Inicio":
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("### 🎯 Objetivo del Sistema")
-        st.write("Control transparente y automatizado de los movimientos monetarios, auditoría en tiempo real, gestión de presupuestos y generación de comprobantes con Plotly.")
+        st.write("Control transparente y automatizado de los movimientos monetarios, auditoría en tiempo real, gestión de presupuestos y generación de comprobantes asociados al Colegio Francisco de Paula Santander.")
     with col2:
         st.success("✅ **Estado del Sistema:** Operativo y Sincronizado.")
 
     st.markdown("---")
-    st.markdown("### 👥 Equipo de Trabajo")
+    st.markdown("### 👥 Equipo de Trabajo - Proyecto de Vida")
     integrantes_data = [
-        {"N.°": 1, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Líder de Proyecto / Administración"},
-        {"N.°": 2, "Nombre Completo": "Nicol Vanegas Cruz", "Rol / Responsabilidad": "Gestión de Registro e Ingresos"},
-        {"N.°": 3, "Nombre Completo": "Jhonatan Andrey Melo", "Rol / Responsabilidad": "Control de Gastos e Insumos"},
-        {"N.°": 4, "Nombre Completo": "Alejandro Martinez Rubio", "Rol / Responsabilidad": "Soportes y Control de Balance"},
+        {"N.°": 1, "Nombre Completo": "Saray Medina", "Rol / Responsabilidad": "Estudiante Responsable / Dirección"},
+        {"N.°": 2, "Nombre Completo": "sahra sofia águila vargas", "Rol / Responsabilidad": "Gestión de Registros y Finanzas"},
+        {"N.°": 3, "Nombre Completo": "shara Aguilar", "Rol / Responsabilidad": "Control de Insumos y Gastos"},
+        {"N.°": 4, "Nombre Completo": "Ivan Santiago Valencia Villamil", "Rol / Responsabilidad": "Soporte Técnico y Balances"},
     ]
     st.dataframe(pd.DataFrame(integrantes_data), use_container_width=True, hide_index=True)
 
@@ -434,6 +439,7 @@ elif menu == "6. Anexo de Recibos & QR":
             f"ID: {rec_id}\n"
             f"Fecha de Emisión: {fecha_actual}\n"
             f"Institución: Colegio Francisco de Paula Santander\n"
+            f"Estudiante: Saray Medina\n"
             f"--------------------------------------\n"
             f"Total Ingresos: ${tot_ing:,.0f} COP\n"
             f"Total Gastos: ${tot_gas:,.0f} COP\n"
