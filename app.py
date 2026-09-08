@@ -8,6 +8,7 @@ from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
 from datetime import datetime
 import plotly.express as px
+import os
 
 # Configuración inicial de la página
 st.set_page_config(
@@ -181,14 +182,15 @@ if st.sidebar.button("💬 Abrir / Cerrar Asistente IA"):
 if st.session_state.ia_abierta:
     with st.sidebar.container():
         st.markdown("### 🧠 Chat Asesor IA")
-        api_key_input = st.text_input("Gemini API Key:", type="password", key="api_key_ia")
+        api_key_input = st.text_input("Gemini API Key:", type="password", value=os.environ.get("GEMINI_API_KEY", ""), key="api_key_ia")
         pregunta_ia = st.text_input("¿Qué deseas consultar?", placeholder="Ej: ¿Cómo van los gastos?")
         
         if st.button("Consultar IA"):
-            if api_key_input.strip() != "":
+            api_key_efectiva = api_key_input.strip() or os.environ.get("GEMINI_API_KEY", "")
+            if api_key_efectiva:
                 try:
                     from google import genai
-                    client = genai.Client(api_key=api_key_input)
+                    client = genai.Client(api_key=api_key_efectiva)
                     
                     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
                     tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
@@ -197,9 +199,9 @@ if st.session_state.ia_abierta:
                     contexto = f"Datos del proyecto Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
-                    # AQUÍ SE ACTUALIZÓ EL MODELO A gemini-3.6-flash
+                    # Corrección del nombre del modelo a uno válido ("gemini-2.5-flash" o similar)
                     response = client.models.generate_content(
-                        model="gemini-3.6-flash",
+                        model="gemini-2.5-flash",
                         contents=prompt_completo,
                     )
                     
@@ -208,7 +210,7 @@ if st.session_state.ia_abierta:
                 except Exception as e:
                     st.error(f"Error: {e}")
             else:
-                st.warning("Ingresa tu API Key.")
+                st.warning("⚠️ Ingresa tu API Key o configura la variable de entorno GEMINI_API_KEY.")
 
 # --- 1. INICIO ---
 if menu == "1. Inicio":
