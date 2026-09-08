@@ -173,7 +173,7 @@ try:
 except Exception:
     pass
 
-# --- APARTADO DE IA EN EL BORDE ---
+# --- APARTADO DE IA EN EL BORDE (SIN RESTRICCIÓN DE FORMATO) ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("🤖 **Asistente IA del Borde**")
 if st.sidebar.button("💬 Abrir / Cerrar Asistente IA"):
@@ -182,18 +182,16 @@ if st.sidebar.button("💬 Abrir / Cerrar Asistente IA"):
 if st.session_state.ia_abierta:
     with st.sidebar.container():
         st.markdown("### 🧠 Chat Asesor IA")
-        api_key_input = st.text_input("Gemini API Key:", type="password", value=os.environ.get("GEMINI_API_KEY", ""), key="api_key_ia")
+        api_key_input = st.text_input("Clave de API / Token:", type="password", value=os.environ.get("GEMINI_API_KEY", ""), key="api_key_ia")
         pregunta_ia = st.text_input("¿Qué deseas consultar?", placeholder="Ej: ¿Cómo van los gastos?")
         
         if st.button("Consultar IA"):
             api_key_efectiva = api_key_input.strip() or os.environ.get("GEMINI_API_KEY", "")
             
-            # Validación estricta para evitar que coja credenciales erróneas de Google Cloud
-            if not api_key_efectiva.startswith("AIza"):
-                st.error("⚠️ Debes introducir una Clave de API válida de Google AI Studio (empieza por 'AIza').")
+            if not api_key_efectiva:
+                st.error("⚠️ Debes introducir una clave de API o token.")
             else:
                 try:
-                    # Fijamos explícitamente la variable de entorno para forzar autenticación por API Key limpia
                     os.environ["GEMINI_API_KEY"] = api_key_efectiva
                     
                     from google import genai
