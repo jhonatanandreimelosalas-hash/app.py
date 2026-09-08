@@ -30,7 +30,7 @@ st.markdown("""
 
 EXCEL_FILE = "Proyecto_Financiero_Eventos_Actualizado (1).xlsx"
 
-# Integrantes reales del proyecto (sin nombres ajenos)
+# Integrantes reales del proyecto
 INTEGRANTES_LISTA = [
     "Ivan Santiago Valencia Villamil",
     "Nicol Vanegas Cruz",
@@ -240,9 +240,22 @@ elif menu == "2. Registro de Ingresos":
         if filtro_resp_i != "Todos":
             df_mostrar_i = df_mostrar_i[df_mostrar_i["Responsable"] == filtro_resp_i]
 
-        st.dataframe(df_mostrar_i, use_container_width=True, hide_index=True)
+        st.dataframe(df_mostrar_i, use_container_width=True, hide_index=False)
         total_ing = st.session_state.ingresos_df["Valor"].astype(float).sum()
         st.metric(label="💵 TOTAL INGRESOS", value=f"${total_ing:,.0f} COP")
+
+        # --- SECCIÓN PARA ELIMINAR INGRESO ---
+        st.markdown("---")
+        st.markdown("### 🗑️ Eliminar un Ingreso Erróneo")
+        opciones_borrar_i = [f"Fila {idx}: {row['Concepto']} - ${row['Valor']:,.0f} ({row['Fecha']})" for idx, row in st.session_state.ingresos_df.iterrows()]
+        item_a_borrar_i = st.selectbox("Selecciona el ingreso que deseas quitar:", opciones_borrar_i)
+        
+        if st.button("❌ Eliminar Ingreso Seleccionado"):
+            idx_real = int(item_a_borrar_i.split("Fila ")[1].split(":")[0])
+            st.session_state.ingresos_df = st.session_state.ingresos_df.drop(idx_real).reset_index(drop=True)
+            guardar_todo_en_excel()
+            st.success("¡Ingreso eliminado correctamente!")
+            st.rerun()
     else:
         st.info("No hay ingresos registrados todavía. Usa el formulario de arriba para agregar uno.")
 
@@ -300,9 +313,22 @@ elif menu == "3. Registro de Gastos":
         if filtro_cat_g != "Todas":
             df_mostrar_g = df_mostrar_g[df_mostrar_g["Categoría"] == filtro_cat_g]
 
-        st.dataframe(df_mostrar_g, use_container_width=True, hide_index=True)
+        st.dataframe(df_mostrar_g, use_container_width=True, hide_index=False)
         total_gas = st.session_state.gastos_df["Valor"].astype(float).sum()
         st.metric(label="💸 TOTAL GASTOS", value=f"${total_gas:,.0f} COP")
+
+        # --- SECCIÓN PARA ELIMINAR GASTO ---
+        st.markdown("---")
+        st.markdown("### 🗑️ Eliminar un Gasto Erróneo")
+        opciones_borrar_g = [f"Fila {idx}: {row['Concepto']} - ${row['Valor']:,.0f} ({row['Fecha']})" for idx, row in st.session_state.gastos_df.iterrows()]
+        item_a_borrar_g = st.selectbox("Selecciona el gasto que deseas quitar:", opciones_borrar_g)
+        
+        if st.button("❌ Eliminar Gasto Seleccionado"):
+            idx_real_g = int(item_a_borrar_g.split("Fila ")[1].split(":")[0])
+            st.session_state.gastos_df = st.session_state.gastos_df.drop(idx_real_g).reset_index(drop=True)
+            guardar_todo_en_excel()
+            st.success("¡Gasto eliminado correctamente!")
+            st.rerun()
     else:
         st.info("No hay gastos registrados todavía. Usa el formulario de arriba para agregar uno.")
 
@@ -424,3 +450,4 @@ elif menu == "7. Reporte Final":
     guardar_todo_en_excel()
     with open(EXCEL_FILE, "rb") as f:
         st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        
