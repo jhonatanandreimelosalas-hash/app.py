@@ -1,6 +1,7 @@
+google-genai
 streamlit
 pandas
 openpyxl
 qrcode
-Pillow
+pillow
 plotly
