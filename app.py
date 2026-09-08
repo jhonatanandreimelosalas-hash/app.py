@@ -17,7 +17,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Estilos CSS modernos y personalizados
+# Estilos CSS modernos y personalizados (incluyendo el botón flotante de la IA en el borde)
 st.markdown("""
     <style>
         .main-header { font-size: 2.3rem; color: #1E3A8A; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }
@@ -38,18 +38,25 @@ INTEGRANTES_LISTA = [
     "Alejandro Martinez Rubio"
 ]
 
-# --- INICIALIZAR ESTADO DE DATOS LIMPIOS EN SESSION_STATE ---
+# --- INICIALIZAR ESTADO DE DATOS Y VIP EN SESSION_STATE ---
 if 'ingresos_df' not in st.session_state:
     st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones"])
 
 if 'gastos_df' not in st.session_state:
     st.session_state.gastos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor", "Responsable"])
 
+if 'vip_df' not in st.session_state:
+    st.session_state.vip_df = pd.DataFrame(columns=["Fecha", "Asistente", "Codigo VIP", "Monto Aporte", "Estado"])
+
+if 'ia_abierta' not in st.session_state:
+    st.session_state.ia_abierta = False
+
 def guardar_todo_en_excel():
     """Sincroniza los DataFrames actuales con el archivo Excel manteniendo el formato"""
     with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
         st.session_state.ingresos_df.to_excel(writer, sheet_name='Registro de Ingresos', index=False)
         st.session_state.gastos_df.to_excel(writer, sheet_name='Registro de Gastos', index=False)
+        st.session_state.vip_df.to_excel(writer, sheet_name='Registro VIP', index=False)
     
     try:
         wb = openpyxl.load_workbook(EXCEL_FILE)
@@ -92,12 +99,10 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     except IOError:
         font_title = font_bold = font_regular = font_small = ImageFont.load_default()
 
-    # Franja superior institucional
     draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
     draw.text((30, 25), "COLEGIO FRANCISCO DE PAULA SANTANDER", fill="#FFFFFF", font=font_title)
     draw.text((30, 60), "Comprobante General de Balance Financiero", fill="#93C5FD", font=font_regular)
     
-    # Cuadro contenedor principal
     draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
     
     draw.text((55, 160), f"ID de Comprobante:", fill="#64748B", font=font_small)
@@ -156,7 +161,8 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "4. Balance Financiero", 
     "5. Dashboard y Gráficos", 
     "6. Anexo de Recibos & QR", 
-    "7. Reporte Final"
+    "7. Zona VIP / Premium 🌟",  # <--- NUEVA SECCIÓN VIP
+    "8. Reporte Final"
 ])
 st.sidebar.markdown("---")
 
@@ -172,6 +178,41 @@ try:
         )
 except Exception:
     pass
+
+# --- APARTADO DE IA EN EL BORDE (SIDEBAR INFERIOR / FLOTANTE) ---
+st.sidebar.markdown("---")
+st.sidebar.markdown("🤖 **Asistente IA del Borde**")
+if st.sidebar.button("💬 Abrir / Cerrar Asistente IA"):
+    st.session_state.ia_abierta = not st.session_state.ia_abierta
+
+if st.session_state.ia_abierta:
+    with st.sidebar.container():
+        st.markdown("### 🧠 Chat Asesor IA")
+        api_key_input = st.text_input("Gemini API Key:", type="password", key="api_key_ia")
+        pregunta_ia = st.text_input("¿Qué deseas consultar?", placeholder="Ej: ¿Cómo vamos con los gastos?")
+        
+        if st.button("Consultar IA"):
+            if api_key_input.strip() != "":
+                try:
+                    from google import genai
+                    client = genai.Client(api_key=api_key_input)
+                    tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
+                    tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+                    saldo = tot_ing - tot_gas
+                    
+                    contexto = f"Datos del evento Colegio Francisco de Paula Santander: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
+                    prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
+                    
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt_completo,
+                    )
+                    st.success("Respuesta:")
+                    st.write(response.text)
+                except Exception as e:
+                    st.error(f"Error: {e}")
+            else:
+                st.warning("Ingresa tu API Key.")
 
 # --- 1. INICIO ---
 if menu == "1. Inicio":
@@ -244,7 +285,6 @@ elif menu == "2. Registro de Ingresos":
         total_ing = st.session_state.ingresos_df["Valor"].astype(float).sum()
         st.metric(label="💵 TOTAL INGRESOS", value=f"${total_ing:,.0f} COP")
 
-        # --- SECCIÓN PARA ELIMINAR INGRESO ---
         st.markdown("---")
         st.markdown("### 🗑️ Eliminar un Ingreso Erróneo")
         opciones_borrar_i = [f"Fila {idx}: {row['Concepto']} - ${row['Valor']:,.0f} ({row['Fecha']})" for idx, row in st.session_state.ingresos_df.iterrows()]
@@ -317,7 +357,6 @@ elif menu == "3. Registro de Gastos":
         total_gas = st.session_state.gastos_df["Valor"].astype(float).sum()
         st.metric(label="💸 TOTAL GASTOS", value=f"${total_gas:,.0f} COP")
 
-        # --- SECCIÓN PARA ELIMINAR GASTO ---
         st.markdown("---")
         st.markdown("### 🗑️ Eliminar un Gasto Erróneo")
         opciones_borrar_g = [f"Fila {idx}: {row['Concepto']} - ${row['Valor']:,.0f} ({row['Fecha']})" for idx, row in st.session_state.gastos_df.iterrows()]
@@ -431,8 +470,57 @@ elif menu == "6. Anexo de Recibos & QR":
                 mime="image/png"
             )
 
-# --- 7. REPORTE FINAL ---
-elif menu == "7. Reporte Final":
+# --- 7. ZONA VIP / PREMIUM ---
+elif menu == "7. Zona VIP / Premium 🌟":
+    st.markdown('<p class="main-header">🌟 Módulo Exclusivo VIP / Premium</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Gestión de accesos y control protegido por contraseña</p>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    # Sistema de contraseña para entrar al contenido VIP
+    pwd_input = st.text_input("Introduce la contraseña de acceso VIP:", type="password")
+    
+    if pwd_input == "Colegio2026*VIP":
+        st.success("🔓 ¡Contraseña correcta! Acceso concedido al Módulo VIP.")
+        
+        with st.expander("➕ Registrar Nuevo Ingreso VIP", expanded=True):
+            with st.form("form_vip"):
+                c1, c2 = st.columns(2)
+                with c1:
+                    f_vip = st.date_input("Fecha VIP", value=datetime.now())
+                    nombre_asistente = st.text_input("Nombre del Asistente / Patrocinador VIP")
+                with c2:
+                    codigo_vip = st.text_input("Código de Validación VIP (ej. VIP-999)", value="VIP-001")
+                    monto_vip = st.number_input("Monto de Aporte VIP ($)", min_value=0.0, step=5000.0)
+                
+                btn_guardar_vip = st.form_submit_button("Guardar Registro VIP")
+                if btn_guardar_vip:
+                    if nombre_asistente.strip() == "":
+                        st.error("El nombre no puede estar vacío.")
+                    else:
+                        nuevo_vip = {
+                            "Fecha": f_vip.strftime("%Y-%m-%d"),
+                            "Asistente": nombre_asistente,
+                            "Codigo VIP": codigo_vip,
+                            "Monto Aporte": float(monto_vip),
+                            "Estado": "Activo"
+                        }
+                        st.session_state.vip_df = pd.concat([st.session_state.vip_df, pd.DataFrame([nuevo_vip])], ignore_index=True)
+                        guardar_todo_en_excel()
+                        st.success("¡Registro VIP agregado exitosamente!")
+                        st.rerun()
+
+        st.markdown("### 📋 Listado de Registros VIP")
+        if not st.session_state.vip_df.empty:
+            st.dataframe(st.session_state.vip_df, use_container_width=True)
+            total_vip = st.session_state.vip_df["Monto Aporte"].astype(float).sum()
+            st.metric("💎 TOTAL RECAUDADO VIP", f"${total_vip:,.0f} COP")
+        else:
+            st.info("Aún no hay registros en la zona VIP.")
+    else:
+        st.warning("🔒 Esta sección está protegida. Ingresa la contraseña de organizador para desbloquear el contenido VIP.")
+
+# --- 8. REPORTE FINAL ---
+elif menu == "8. Reporte Final":
     st.markdown('<p class="main-header">📑 Reporte Final del Evento</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Consolidado general y descarga</p>', unsafe_allow_html=True)
     st.markdown("---")
@@ -450,4 +538,4 @@ elif menu == "7. Reporte Final":
     guardar_todo_en_excel()
     with open(EXCEL_FILE, "rb") as f:
         st.download_button("⬇️ Descargar Excel Completo", data=f, file_name="Proyecto_Financiero_Eventos_Actualizado.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        
+    
