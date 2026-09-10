@@ -547,42 +547,62 @@ elif menu == "6. Anexo de Recibos & QR":
 
 elif menu == "7. Gestión de Archivos":
     st.markdown('<p class="main-header">📁 Repositorio de Documentos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Registra y administra los comprobantes y documentos del proyecto en la base de datos.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Registra, administra y descarga los comprobantes y documentos del proyecto.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
+    import base64
+
     with st.form("form_subir_archivo"):
         archivo_subido = st.file_uploader("Sube tu archivo (PDF, PNG, JPG)", type=["png", "jpg", "jpeg", "pdf"])
         descripcion_archivo = st.text_input("Descripción o Nota del Documento")
-        submit_archivo = st.form_submit_button("💾 Registrar Archivo en el Sistema")
+        submit_archivo = st.form_submit_button("💾 Guardar y Registrar Archivo")
         
         if submit_archivo and db:
             if archivo_subido is not None:
+                # Convertir el archivo binario a Base64 para guardarlo en Firestore gratis
+                bytes_archivo = archivo_subido.getvalue()
+                base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
+                
                 nombre_id = f"ARCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 doc_data = {
                     "ID": nombre_id,
                     "nombre": archivo_subido.name,
                     "tipo": archivo_subido.type,
+                    "archivo_b64": base64_archivo, # Guardamos el archivo codificado
                     "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
                 }
                 db.collection("archivos").document(nombre_id).set(doc_data)
-                st.success("✅ ¡Archivo registrado y guardado exitosamente en la base de datos!")
+                st.success("✅ ¡Archivo guardado exitosamente en la base de datos!")
                 st.rerun()
             else:
                 st.error("⚠️ Por favor selecciona un archivo antes de guardar.")
 
-    st.markdown("### 📋 Lista de Archivos y Comprobantes Registrados")
+    st.markdown("### 📋 Archivos Registrados y Disponibles para Descargar")
     if db:
         try:
             archivos_ref = db.collection("archivos").stream()
             archivos_lista = [a.to_dict() for a in archivos_ref]
             
             if archivos_lista:
-                df_archivos = pd.DataFrame(archivos_lista)
-                cols_orden = [col for col in ["fecha", "nombre", "tipo", "descripcion", "subido_por"] if col in df_archivos.columns]
-                st.dataframe(df_archivos[cols_orden], use_container_width=True, hide_index=True)
+                for row in archivos_lista:
+                    with st.expander(f"📄 {row['nombre']} — ({row['fecha']})"):
+                        st.write(f"**Descripción:** {row['descripcion']}")
+                        st.write(f"**Subido por:** {row['subido_por']}")
+                        
+                        # Botón para descargar el archivo guardado
+                        if "archivo_b64" in row:
+                            b64_bytes = base64.b64decode(row['archivo_b64'])
+                            st.download_button(
+                                label=f"📥 Descargar / Abrir {row['nombre']}",
+                                data=b64_bytes,
+                                file_name=row['nombre'],
+                                mime=row['tipo'],
+                                key=f"dl_{row['ID']}"
+                            )
                 
+                st.markdown("---")
                 st.markdown("### 🗑️ Eliminar Registro de Archivo")
                 opciones_arch = [f"{row['nombre']} ({row['fecha']})" for row in archivos_lista]
                 sel_arch = st.selectbox("Selecciona archivo a eliminar:", opciones_arch)
