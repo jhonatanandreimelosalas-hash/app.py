@@ -635,15 +635,12 @@ elif menu == "8. Reporte Final":
         from openpyxl.utils import get_column_letter
 
         wb = openpyxl.Workbook()
-        # Eliminar la hoja por defecto
         wb.remove(wb.active)
 
-        # Paleta de colores (Azul institucional y grises suaves)
         HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
         HEADER_FONT = Font(name="Arial", size=11, bold=True, color="FFFFFF")
         TITLE_FONT = Font(name="Arial", size=16, bold=True, color="1E3A8A")
         REGULAR_FONT = Font(name="Arial", size=10, color="333333")
-        BOLD_FONT = Font(name="Arial", size=10, bold=True, color="333333")
         
         THIN_BORDER = Border(
             left=Side(style='thin', color='CBD5E1'),
@@ -654,21 +651,22 @@ elif menu == "8. Reporte Final":
         
         zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
 
-        def estilizar_hoja(ws, titulo, df):
-            # Título principal
-            ws.append([titulo])
-            ws.append([]) # Fila vacía
+        # Obtener el nombre del usuario logueado dinámicamente
+        nombre_usuario = st.session_state.user_data.get('institucion', 'Institución Financiera')
+
+        def estilizar_hoja(ws, titulo_base, df):
+            titulo_completo = f"{nombre_usuario.upper()} - {titulo_base}"
+            ws.append([titulo_completo])
+            ws.append([]) 
             ws.cell(row=1, column=1).font = TITLE_FONT
             
             if df.empty:
                 ws.append(["No hay registros disponibles."])
                 return
 
-            # Escribir cabeceras
             headers = [col for col in df.columns if col != 'ID']
             ws.append(headers)
             
-            # Formatear cabeceras
             for col_num in range(1, len(headers) + 1):
                 cell = ws.cell(row=3, column=col_num)
                 cell.fill = HEADER_FILL
@@ -676,7 +674,6 @@ elif menu == "8. Reporte Final":
                 cell.alignment = Alignment(horizontal="center", vertical="center")
                 cell.border = THIN_BORDER
 
-            # Escribir datos
             for row_idx, row in df.iterrows():
                 fila_datos = [row[col] for col in headers]
                 ws.append(fila_datos)
@@ -691,38 +688,36 @@ elif menu == "8. Reporte Final":
                     if is_zebra:
                         cell.fill = zebra_fill
                         
-                    # Alinear a la derecha si es numérico (Valores)
                     if headers[col_num - 1] == "Valor" and isinstance(cell.value, (int, float)):
                         cell.number_format = '"$"#,##0'
                         cell.alignment = Alignment(horizontal="right", vertical="center")
                     else:
                         cell.alignment = Alignment(horizontal="left", vertical="center")
 
-            # Ajustar automáticamente el ancho de las columnas
             for col in ws.columns:
                 max_len = 0
                 col_letter = get_column_letter(col[0].column)
                 for cell in col:
-                    if cell.row > 2 and cell.value:  # Omitir título y fila vacía para el cálculo
+                    if cell.row > 2 and cell.value:
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
         # 1. Hoja de Ingresos
         ws_ing = wb.create_sheet(title="Ingresos")
-        estilizar_hoja(ws_ing, "COLEGIO FRANCISCO DE PAULA SANTANDER - REPORTE DE INGRESOS", st.session_state.ingresos_df)
+        estilizar_hoja(ws_ing, "REPORTE DE INGRESOS", st.session_state.ingresos_df)
 
         # 2. Hoja de Gastos
         ws_gas = wb.create_sheet(title="Gastos")
-        estilizar_hoja(ws_gas, "COLEGIO FRANCISCO DE PAULA SANTANDER - REPORTE DE GASTOS", st.session_state.gastos_df)
+        estilizar_hoja(ws_gas, "REPORTE DE GASTOS", st.session_state.gastos_df)
 
         wb.save(EXCEL_FILE)
-        st.success("✅ ¡Reporte Excel generado con éxito y diseño profesional!")
+        st.success("✅ ¡Reporte Excel generado con éxito usando el nombre de tu cuenta!")
 
     if os.path.exists(EXCEL_FILE):
         with open(EXCEL_FILE, "rb") as f:
             st.download_button(
                 "📥 Descargar Archivo Excel Profesional", 
                 data=f, 
-                file_name="Reporte_Financiero_Colegio.xlsx", 
+                file_name="Reporte_Financiero.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
