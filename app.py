@@ -721,6 +721,7 @@ elif menu == "8. Reporte Final":
                 file_name="Reporte_Financiero.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
 elif menu == "9. Indicadores y Dashboard":
     st.markdown('<p class="main-header">📈 Indicadores Clave (KPIs)</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Análisis visual en tiempo real del comportamiento financiero.</p>', unsafe_allow_html=True)
