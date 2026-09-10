@@ -67,10 +67,10 @@ bucket = storage.bucket() if firebase_admin._apps else None
 # --- DATOS GLOBALES ---
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 INTEGRANTES_LISTA = [
-    "Jhonnattan Andrei Melo Salas",
-    "Nicol Stefani Vanegas Cruz",
-    "Luis Alejandro Martínez Rubio",
-    "Iván Santiago Valencia Villamil"
+    "Saray Medina",
+    "sahra sofia águila vargas",
+    "shara Aguilar",
+    "Jhonnattan Andrei Melo Salas"
 ]
 
 # --- CONTROL DE SESIÓN ---
@@ -135,6 +135,67 @@ def generar_miniatura_pdf(file_bytes):
         return buf.getvalue()
     except Exception as e:
         return None
+
+# --- FUNCIÓN PARA GENERAR IMAGEN DE RECIBO DECORADA ---
+def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
+    img_w, img_h = 650, 880
+    base_img = Image.new("RGB", (img_w, img_h), color="#FFFFFF")
+    draw = ImageDraw.Draw(base_img)
+    
+    try:
+        font_title = ImageFont.truetype("arial.ttf", 22)
+        font_bold = ImageFont.truetype("arialbd.ttf", 15)
+        font_regular = ImageFont.truetype("arial.ttf", 14)
+        font_small = ImageFont.truetype("arial.ttf", 11)
+    except IOError:
+        font_title = font_bold = font_regular = font_small = ImageFont.load_default()
+
+    draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
+    draw.text((30, 25), "COLEGIO FRANCISCO DE PAULA SANTANDER", fill="#FFFFFF", font=font_title)
+    draw.text((30, 60), "Comprobante General de Balance Financiero", fill="#93C5FD", font=font_regular)
+    
+    draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
+    
+    draw.text((55, 160), "ID de Comprobante:", fill="#64748B", font=font_small)
+    draw.text((200, 158), f"{rec_id}", fill="#1E293B", font=font_bold)
+    
+    draw.text((55, 190), "Fecha de Emisión:", fill="#64748B", font=font_small)
+    draw.text((200, 188), f"{fecha}", fill="#1E293B", font=font_bold)
+
+    draw.text((55, 220), "Institución:", fill="#64748B", font=font_small)
+    draw.text((200, 218), "Colegio Francisco de Paula Santander", fill="#1E293B", font=font_bold)
+    
+    draw.line([(55, 255), (img_w - 55, 255)], fill="#CBD5E1", width=1)
+    
+    draw.text((55, 280), "RESUMEN DE MOVIMIENTOS", fill="#1E3A8A", font=font_bold)
+    
+    draw.text((55, 320), "(+) Total Ingresos:", fill="#334155", font=font_regular)
+    draw.text((400, 320), f"${tot_ing:,.0f} COP", fill="#059669", font=font_bold)
+    
+    draw.text((55, 360), "(-) Total Gastos:", fill="#334155", font=font_regular)
+    draw.text((400, 360), f"${tot_gas:,.0f} COP", fill="#DC2626", font=font_bold)
+    
+    draw.line([(55, 400), (img_w - 55, 400)], fill="#CBD5E1", width=1)
+    
+    draw.text((55, 420), "BALANCE NETO FINAL:", fill="#1E3A8A", font=font_bold)
+    color_saldo = "#059669" if saldo >= 0 else "#DC2626"
+    draw.text((370, 415), f"${saldo:,.0f} COP", fill=color_saldo, font=font_title)
+    
+    estado_txt = "ESTADO: APROBADO (SUPERÁVIT)" if saldo >= 0 else "ESTADO: ALERTA (DÉFICIT)"
+    draw.text((55, 465), estado_txt, fill=color_saldo, font=font_small)
+
+    qr_resized = qr_img_pil.resize((180, 180))
+    base_img.paste(qr_resized, (int((img_w - 180) / 2), 510))
+    
+    draw.text((int(img_w / 2) - 130, 710), "Escanea este código QR para validar", fill="#64748B", font=font_small)
+    draw.text((int(img_w / 2) - 120, 730), "la información general del balance", fill="#64748B", font=font_small)
+    
+    draw.text((int(img_w / 2) - 110, 800), "Sistema Automático de Gestión Financiera", fill="#94A3B8", font=font_small)
+
+    buffer_img = BytesIO()
+    base_img.save(buffer_img, format="PNG")
+    buffer_img.seek(0)
+    return buffer_img
 
 # --- PANTALLAS DE AUTENTICACIÓN ---
 if not st.session_state.logged_in:
@@ -208,7 +269,6 @@ if not st.session_state.logged_in:
                 user_ref = db.collection('usuarios').document(email_clean)
                 user_doc = user_ref.get()
                 if user_doc.exists:
-                    # Generar clave temporal de 8 caracteres
                     temp_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
                     user_ref.update({'password': hash_password(temp_pass)})
                     
@@ -456,38 +516,34 @@ elif menu == "5. Dashboard y Gráficos":
 elif menu == "6. Anexo de Recibos & QR":
     st.markdown('<p class="main-header">🧾 Generador de Comprobante General</p>', unsafe_allow_html=True)
     st.markdown("---")
-    st.info("💡 Haz clic para generar el comprobante con código QR.")
+    st.info("💡 Haz clic para generar el comprobante oficial decorado con los datos financieros actuales y su código QR.")
 
-    if st.button("🚀 Generar Comprobante"):
+    if st.button("🚀 Generar Comprobante Oficial"):
         tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
         tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
         saldo = tot_ing - tot_gas
         rec_id = f"GEN-{datetime.now().strftime('%Y%m%d%H%M')}"
+        fecha_actual = datetime.now().strftime('%Y-%m-%d')
         
-        texto_recibo = f"COMPROBANTE {rec_id}\nIngresos: ${tot_ing}\nGastos: ${tot_gas}\nSaldo: ${saldo}"
+        texto_recibo = f"COMPROBANTE {rec_id}\nInstitucion: Colegio Francisco de Paula Santander\nIngresos: ${tot_ing:,.0f}\nGastos: ${tot_gas:,.0f}\nSaldo: ${saldo:,.0f}"
         qr = qrcode.QRCode(box_size=10, border=2)
         qr.add_data(texto_recibo)
         qr.make(fit=True)
+        qr_img_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
         
-        img_w, img_h = 650, 880
-        base_img = Image.new("RGB", (img_w, img_h), color="#FFFFFF")
-        draw = ImageDraw.Draw(base_img)
-        try: font_title = ImageFont.truetype("arial.ttf", 22)
-        except: font_title = ImageFont.load_default()
-        
-        draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
-        draw.text((30, 40), f"Balance: {rec_id} - {datetime.now().strftime('%Y-%m-%d')}", fill="#FFFFFF", font=font_title)
-        
-        qr_resized = qr.make_image(fill_color="black", back_color="white").convert("RGB").resize((200, 200))
-        base_img.paste(qr_resized, (225, 300))
-        
-        buf = BytesIO()
-        base_img.save(buf, format="PNG")
-        st.session_state.rec_img_bytes = buf.getvalue()
+        # Llamar a la función robusta de generación de imagen decorada
+        buffer_recibo = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, qr_img_pil)
+        st.session_state.rec_img_bytes = buffer_recibo.getvalue()
+        st.success("✅ ¡Comprobante generado exitosamente!")
         
     if 'rec_img_bytes' in st.session_state:
-        st.image(st.session_state.rec_img_bytes, width=400)
-        st.download_button("📥 Descargar Recibo PNG", data=st.session_state.rec_img_bytes, file_name="Comprobante.png", mime="image/png")
+        st.image(st.session_state.rec_img_bytes, width=450)
+        st.download_button(
+            "📥 Descargar Comprobante PNG", 
+            data=st.session_state.rec_img_bytes, 
+            file_name="Comprobante_Financiero.png", 
+            mime="image/png"
+        )
 
 elif menu == "7. Gestión de Archivos":
     st.markdown('<p class="main-header">📁 Repositorio de Documentos e Imágenes</p>', unsafe_allow_html=True)
