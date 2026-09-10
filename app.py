@@ -724,14 +724,6 @@ elif menu == "8. Reporte Final":
             )
 
 elif menu == "9. Indicadores y Dashboard":
-    st.markdown('<p class="main-header">📈 Indicadores Clave (KPIs)</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Análisis visual en tiempo real del comportamiento financiero.</p>', unsafe_allow_html=True)
-    st.markdown("---")
-    
-    tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
-    tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
-    saldo = tot_ing - tot_gas
-    
     # Tarjetas Métricas Modernas (KPI Cards)
     col1, col2, col3 = st.columns(3)
     col1.metric("💵 Total Ingresos", f"${tot_ing:,.0f} COP")
