@@ -19,6 +19,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import random
 import string
+import datetime as dt_module  # renombrado para no chocar con 'from datetime import datetime'
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -54,7 +55,7 @@ if not firebase_admin._apps:
         else:
             st.error("⚠️ No se encontraron credenciales de Firebase.")
             st.stop()
-            
+
         firebase_admin.initialize_app(cred, {
             'storageBucket': FIREBASE_STORAGE_BUCKET
         })
@@ -92,35 +93,249 @@ def hash_password(password):
 def verify_password(password, hashed):
     return bcrypt.checkpw(password.encode('utf-8'), hashed.encode('utf-8'))
 
-# --- FUNCIONES DE SINCRONIZACIÓN CON FIREBASE ---
+
+# =====================================================================================
+# REQUISITO 1: AISLAMIENTO DE DATOS POR INSTITUCIÓN
+# -------------------------------------------------------------------------------------
+# Se usa el correo limpio (lower + strip) como identificador de institución, porque
+# es el mismo valor que ya se usa como ID del documento en la colección 'usuarios'
+# (ver 'user_ref = db.collection("usuarios").document(email_login.lower().strip())'
+# más abajo, sin modificar). El nombre visible ('institucion') puede repetirse entre
+# cuentas distintas; el email de cuenta no.
+#
+# Estructura elegida: subcolecciones anidadas bajo el documento de cada institución:
+#   usuarios/{institucion_id}/ingresos/{doc_id}
+#   usuarios/{institucion_id}/gastos/{doc_id}
+#   usuarios/{institucion_id}/archivos/{doc_id}
+#   usuarios/{institucion_id}/auditoria/{doc_id}
+#
+# Se prefirió esto sobre "colecciones globales + campo institucion + where()" porque
+# un query sin el filtro (por error humano futuro) no puede devolver datos ajenos:
+# la separación vive en la ruta del documento, no en una condición que alguien podría
+# omitir accidentalmente al añadir una función nueva más adelante.
+# =====================================================================================
+
+def get_institucion_id():
+    """ID estable de la institución actual: el correo limpio del usuario logueado."""
+    if st.session_state.user_data:
+        return st.session_state.user_data.get('email', '').lower().strip()
+    return None
+
+
 def cargar_datos_nube():
-    if not db: return
+    if not db:
+        return
+    institucion_id = get_institucion_id()
+    if not institucion_id:
+        return
     try:
-        ing_docs = db.collection('ingresos').stream()
+        base_ref = db.collection('usuarios').document(institucion_id)
+
+        ing_docs = base_ref.collection('ingresos').stream()
         ing_data = [doc.to_dict() for doc in ing_docs]
         if ing_data:
             st.session_state.ingresos_df = pd.DataFrame(ing_data)
-        
-        gas_docs = db.collection('gastos').stream()
+        else:
+            st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones", "ID"])
+
+        gas_docs = base_ref.collection('gastos').stream()
         gas_data = [doc.to_dict() for doc in gas_docs]
         if gas_data:
             st.session_state.gastos_df = pd.DataFrame(gas_data)
-    except Exception as e:
+        else:
+            st.session_state.gastos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor", "Responsable", "ID"])
+    except Exception:
         st.sidebar.error("Error al sincronizar con la nube.")
+
 
 def guardar_registro_nube(coleccion, datos):
     if db:
+        institucion_id = get_institucion_id()
+        if not institucion_id:
+            return
         try:
-            db.collection(coleccion).document(datos['ID']).set(datos)
+            db.collection('usuarios').document(institucion_id).collection(coleccion).document(datos['ID']).set(datos)
         except Exception:
             pass
 
+
 def eliminar_registro_nube(coleccion, doc_id):
     if db:
+        institucion_id = get_institucion_id()
+        if not institucion_id:
+            return
         try:
-            db.collection(coleccion).document(doc_id).delete()
+            db.collection('usuarios').document(institucion_id).collection(coleccion).document(doc_id).delete()
         except Exception:
             pass
+
+
+# =====================================================================================
+# REQUISITO 2: AUDITORÍA AUTOMÁTICA
+# -------------------------------------------------------------------------------------
+# Se registra en usuarios/{institucion_id}/auditoria cada vez que se llama a esta
+# función. Se llama explícitamente tras cada acción clave (alta/baja de ingreso o
+# gasto, subida de archivo) en los puntos donde antes solo se hacía el guardado.
+#
+# El antiguo gate por contraseña hardcodeada en texto plano
+# ("El amor que vale 123") se elimina: además de ser una mala práctica de seguridad
+# (cualquiera que lea el código fuente tiene acceso), ya no tiene sentido una vez que
+# los datos están aislados por institución — el propio login ya determina qué
+# auditoría puede ver cada usuario.
+# =====================================================================================
+
+def registrar_auditoria(accion, detalle=""):
+    if not db:
+        return
+    institucion_id = get_institucion_id()
+    if not institucion_id or not st.session_state.user_data:
+        return
+    try:
+        usuario_nombre = st.session_state.user_data.get('institucion', 'Usuario desconocido')
+        log_id = f"LOG-{dt_module.datetime.now().strftime('%Y%m%d%H%M%S%f')}"
+        log_entry = {
+            "fecha_hora": dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            "usuario": usuario_nombre,
+            "institucion": usuario_nombre,
+            "accion": accion,
+            "detalle": detalle,
+        }
+        db.collection('usuarios').document(institucion_id).collection('auditoria').document(log_id).set(log_entry)
+    except Exception:
+        pass
+
+
+# =====================================================================================
+# REQUISITO 3: LOGIN CON GOOGLE (OAuth 2.0 directo)
+# -------------------------------------------------------------------------------------
+# NOTA DE ARQUITECTURA (léela antes de desplegar):
+# Firebase Admin SDK (el que ya usa esta app) NO puede iniciar un flujo de consentimiento
+# interactivo de Google — eso es responsabilidad de un cliente OAuth. Existen dos caminos
+# razonables; aquí se implementa el Enfoque A por no depender de componentes JS de
+# terceros para algo tan sensible como el login:
+#
+#   Enfoque A (implementado): OAuth 2.0 "Authorization Code" directo con Google,
+#   usando el paquete 'requests' para el intercambio de tokens (evita añadir
+#   'google-auth-oauthlib' como dependencia dura si no la tienes ya instalada).
+#   Streamlit no maneja rutas HTTP propias, así que el 'code' de vuelta se lee desde
+#   st.query_params tras la redirección de Google a esta misma URL.
+#
+#   Enfoque B (alternativa, no implementada): Firebase Authentication con SDK JS
+#   embebido vía components.html + un componente puente JS→Python. Da mejor gestión
+#   de sesión/revocación pero depende de paquetes comunitarios (streamlit-firebase-auth
+#   u otros) que cambian de mantenimiento con frecuencia — riesgo alto para producción.
+#
+# REQUISITOS PARA ACTIVAR ESTO EN PRODUCCIÓN:
+#   1. Crear un proyecto OAuth 2.0 en Google Cloud Console (APIs & Services > Credentials).
+#   2. Tipo de aplicación: "Web application".
+#   3. Authorized redirect URI: la URL pública exacta de tu app Streamlit
+#      (ej. https://tuapp.streamlit.app) — debe coincidir carácter por carácter.
+#   4. Agregar a tus secrets de Streamlit:
+#        [google_oauth]
+#        client_id = "TU_CLIENT_ID.apps.googleusercontent.com"
+#        client_secret = "TU_CLIENT_SECRET"
+#        redirect_uri = "https://tuapp.streamlit.app"
+#   Sin estos 3 valores en st.secrets["google_oauth"], el botón de Google se
+#   desactiva automáticamente y solo queda visible el login tradicional (no rompe
+#   la app si no lo configuras todavía).
+# =====================================================================================
+
+GOOGLE_OAUTH_DISPONIBLE = "google_oauth" in st.secrets
+
+def construir_url_login_google():
+    if not GOOGLE_OAUTH_DISPONIBLE:
+        return None
+    client_id = st.secrets["google_oauth"]["client_id"]
+    redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+    scope = "openid email profile"
+    return (
+        "https://accounts.google.com/o/oauth2/v2/auth"
+        f"?client_id={client_id}"
+        f"&redirect_uri={redirect_uri}"
+        "&response_type=code"
+        f"&scope={scope}"
+        "&access_type=online"
+        "&prompt=select_account"
+    )
+
+
+def procesar_callback_google():
+    """Si Google acaba de redirigir con ?code=..., intercambia el code por el perfil
+    del usuario, crea la cuenta si no existe, y abre sesión."""
+    if not GOOGLE_OAUTH_DISPONIBLE:
+        return
+    query_params = st.query_params
+    if "code" not in query_params:
+        return
+
+    import requests
+
+    codigo = query_params["code"]
+    client_id = st.secrets["google_oauth"]["client_id"]
+    client_secret = st.secrets["google_oauth"]["client_secret"]
+    redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
+
+    try:
+        token_resp = requests.post(
+            "https://oauth2.googleapis.com/token",
+            data={
+                "code": codigo,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            },
+            timeout=10,
+        )
+        token_resp.raise_for_status()
+        access_token = token_resp.json()["access_token"]
+
+        perfil_resp = requests.get(
+            "https://www.googleapis.com/oauth2/v2/userinfo",
+            headers={"Authorization": f"Bearer {access_token}"},
+            timeout=10,
+        )
+        perfil_resp.raise_for_status()
+        perfil = perfil_resp.json()
+
+        email_google = perfil.get("email", "").lower().strip()
+        nombre_google = perfil.get("name", email_google)
+
+        if not email_google:
+            st.error("Google no devolvió un correo válido.")
+            st.query_params.clear()
+            return
+
+        if not db:
+            st.error("No hay conexión con la base de datos.")
+            return
+
+        user_ref = db.collection("usuarios").document(email_google)
+        user_doc = user_ref.get()
+
+        if user_doc.exists:
+            user_data = user_doc.to_dict()
+        else:
+            # Cuenta nueva vía Google: sin password local (login_provider marca el origen)
+            user_data = {
+                'institucion': nombre_google,
+                'email': email_google,
+                'password': hash_password(''.join(random.choices(string.ascii_letters + string.digits, k=24))),
+                'login_provider': 'google',
+                'fecha_creacion': dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+            }
+            user_ref.set(user_data)
+
+        st.session_state.logged_in = True
+        st.session_state.user_data = user_data
+        st.query_params.clear()
+        cargar_datos_nube()
+        st.rerun()
+
+    except Exception as e:
+        st.error(f"Error al validar el inicio de sesión con Google: {e}")
+        st.query_params.clear()
+
 
 # --- FUNCIÓN GENERAR MINIATURA PDF ---
 def generar_miniatura_pdf(file_bytes):
@@ -129,11 +344,11 @@ def generar_miniatura_pdf(file_bytes):
         page = doc.load_page(0)
         pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        
+
         buf = BytesIO()
         img.save(buf, format="JPEG", quality=70)
         return buf.getvalue()
-    except Exception as e:
+    except Exception:
         return None
 
 # --- FUNCIÓN PARA GENERAR IMAGEN DE RECIBO DECORADA ---
@@ -141,7 +356,7 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     img_w, img_h = 650, 880
     base_img = Image.new("RGB", (img_w, img_h), color="#FFFFFF")
     draw = ImageDraw.Draw(base_img)
-    
+
     try:
         font_title = ImageFont.truetype("arial.ttf", 22)
         font_bold = ImageFont.truetype("arialbd.ttf", 15)
@@ -153,43 +368,43 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
     draw.text((30, 25), "COLEGIO FRANCISCO DE PAULA SANTANDER", fill="#FFFFFF", font=font_title)
     draw.text((30, 60), "Comprobante General de Balance Financiero", fill="#93C5FD", font=font_regular)
-    
+
     draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
-    
+
     draw.text((55, 160), "ID de Comprobante:", fill="#64748B", font=font_small)
     draw.text((200, 158), f"{rec_id}", fill="#1E293B", font=font_bold)
-    
+
     draw.text((55, 190), "Fecha de Emisión:", fill="#64748B", font=font_small)
     draw.text((200, 188), f"{fecha}", fill="#1E293B", font=font_bold)
 
     draw.text((55, 220), "Institución:", fill="#64748B", font=font_small)
     draw.text((200, 218), "Colegio Francisco de Paula Santander", fill="#1E293B", font=font_bold)
-    
+
     draw.line([(55, 255), (img_w - 55, 255)], fill="#CBD5E1", width=1)
-    
+
     draw.text((55, 280), "RESUMEN DE MOVIMIENTOS", fill="#1E3A8A", font=font_bold)
-    
+
     draw.text((55, 320), "(+) Total Ingresos:", fill="#334155", font=font_regular)
     draw.text((400, 320), f"${tot_ing:,.0f} COP", fill="#059669", font=font_bold)
-    
+
     draw.text((55, 360), "(-) Total Gastos:", fill="#334155", font=font_regular)
     draw.text((400, 360), f"${tot_gas:,.0f} COP", fill="#DC2626", font=font_bold)
-    
+
     draw.line([(55, 400), (img_w - 55, 400)], fill="#CBD5E1", width=1)
-    
+
     draw.text((55, 420), "BALANCE NETO FINAL:", fill="#1E3A8A", font=font_bold)
     color_saldo = "#059669" if saldo >= 0 else "#DC2626"
     draw.text((370, 415), f"${saldo:,.0f} COP", fill=color_saldo, font=font_title)
-    
+
     estado_txt = "ESTADO: APROBADO (SUPERÁVIT)" if saldo >= 0 else "ESTADO: ALERTA (DÉFICIT)"
     draw.text((55, 465), estado_txt, fill=color_saldo, font=font_small)
 
     qr_resized = qr_img_pil.resize((180, 180))
     base_img.paste(qr_resized, (int((img_w - 180) / 2), 510))
-    
+
     draw.text((int(img_w / 2) - 130, 710), "Escanea este código QR para validar", fill="#64748B", font=font_small)
     draw.text((int(img_w / 2) - 120, 730), "la información general del balance", fill="#64748B", font=font_small)
-    
+
     draw.text((int(img_w / 2) - 110, 800), "Sistema Automático de Gestión Financiera", fill="#94A3B8", font=font_small)
 
     buffer_img = BytesIO()
@@ -199,13 +414,40 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
 
 # --- PANTALLAS DE AUTENTICACIÓN ---
 if not st.session_state.logged_in:
+    # Procesa el retorno de Google (si Google acaba de redirigir con ?code=...)
+    # ANTES de dibujar el formulario, para que si ya hay sesión válida no se
+    # muestre el login de nuevo.
+    procesar_callback_google()
+
     st.markdown('<p class="main-header" style="text-align: center;">🏛️ Portal Financiero Institucional</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header" style="text-align: center;">Colegio Francisco de Paula Santander</p>', unsafe_allow_html=True)
-    
+
     tab1, tab2, tab3 = st.tabs(["Iniciar Sesión", "Crear Cuenta", "Olvidé mi Contraseña"])
-    
+
     with tab1:
         st.markdown("### Acceso con Credenciales")
+
+        # --- Botón de Google (Requisito 3) ---
+        if GOOGLE_OAUTH_DISPONIBLE:
+            url_google = construir_url_login_google()
+            st.markdown(
+                f"""
+                <a href="{url_google}" target="_self" style="text-decoration:none;">
+                    <div style="display:flex; align-items:center; justify-content:center;
+                                gap:10px; border:1px solid #E2E8F0; border-radius:8px;
+                                padding:10px; background-color:white; cursor:pointer;
+                                margin-bottom:15px; font-weight:600; color:#334155;">
+                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18">
+                        Iniciar sesión con Google
+                    </div>
+                </a>
+                """,
+                unsafe_allow_html=True,
+            )
+            st.markdown("<p style='text-align:center; color:#94A3B8; font-size:0.85rem;'>— o con tu correo y contraseña —</p>", unsafe_allow_html=True)
+        else:
+            st.caption("ℹ️ El login con Google no está configurado aún (faltan secrets [google_oauth]). Usa correo y contraseña.")
+
         with st.form("login_form_tradicional"):
             email_login = st.text_input("Correo Electrónico")
             pass_login = st.text_input("Contraseña", type="password")
@@ -236,7 +478,7 @@ if not st.session_state.logged_in:
             email_reg = st.text_input("Correo Electrónico")
             pass_reg = st.text_input("Contraseña (Min. 6 caracteres, 1 mayúscula)", type="password")
             submit_reg = st.form_submit_button("Registrar Cuenta")
-            
+
             if submit_reg and db:
                 if len(pass_reg) < 6 or not any(c.isupper() for c in pass_reg):
                     st.error("La contraseña debe tener al menos 6 caracteres y 1 letra mayúscula.")
@@ -245,7 +487,7 @@ if not st.session_state.logged_in:
                 else:
                     email_clean = email_reg.lower().strip()
                     email_exists = db.collection('usuarios').document(email_clean).get().exists
-                    
+
                     if email_exists:
                         st.error("Ya existe una cuenta con este correo electrónico.")
                     else:
@@ -263,7 +505,7 @@ if not st.session_state.logged_in:
             st.info("Ingresa tu correo y te enviaremos una contraseña temporal de recuperación a tu bandeja.")
             email_forgot = st.text_input("Correo Electrónico registrado")
             submit_forgot = st.form_submit_button("Enviar Contraseña Temporal")
-            
+
             if submit_forgot and db:
                 email_clean = email_forgot.lower().strip()
                 user_ref = db.collection('usuarios').document(email_clean)
@@ -271,31 +513,31 @@ if not st.session_state.logged_in:
                 if user_doc.exists:
                     temp_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
                     user_ref.update({'password': hash_password(temp_pass)})
-                    
+
                     try:
                         remitente = st.secrets["smtp"]["email"]
                         password_smtp = st.secrets["smtp"]["password"]
-                        
+
                         msg = MIMEMultipart()
                         msg['From'] = remitente
                         msg['To'] = email_clean
                         msg['Subject'] = "Recuperación de Contraseña - Colegio Francisco de Paula Santander"
-                        
+
                         cuerpo = f"Hola,\n\nHas solicitado recuperar tu contraseña en el Portal Financiero.\nTu nueva contraseña temporal es: {temp_pass}\n\nInicia sesión con ella y recuerda cambiarla."
                         msg.attach(MIMEText(cuerpo, 'plain'))
-                        
+
                         server = smtplib.SMTP('smtp.gmail.com', 587)
                         server.starttls()
                         server.login(remitente, password_smtp)
                         server.sendmail(remitente, email_clean, msg.as_string())
                         server.quit()
-                        
+
                         st.success(f"✅ ¡Correo enviado exitosamente a {email_clean}! Revisa tu bandeja de entrada o spam.")
                     except Exception as e:
                         st.error(f"Error al enviar el correo. Asegúrate de configurar los secretos [smtp] en Streamlit. Detalle: {e}")
                 else:
                     st.error("El correo no está registrado en nuestra base de datos.")
-    
+
     st.stop()
 
 import datetime
@@ -303,7 +545,6 @@ import datetime
 import datetime
 
 # --- INICIALIZAR ESTADO DE OMITIR ALERTA ---
-# Esto asegura que la página recuerde si le diste a "Omitir" para no molestarte más
 if "omitir_alerta_presupuesto" not in st.session_state:
     st.session_state.omitir_alerta_presupuesto = False
 
@@ -312,18 +553,15 @@ st.sidebar.markdown(f"👋 **Hola, {st.session_state.user_data['institucion']}**
 if st.sidebar.button("🚪 Cerrar Sesión"):
     st.session_state.logged_in = False
     st.session_state.user_data = None
-    # Reiniciamos la alerta para que vuelva a avisar en el próximo inicio de sesión
-    st.session_state.omitir_alerta_presupuesto = False 
+    st.session_state.omitir_alerta_presupuesto = False
     st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚙️ **Configuración de Presupuesto**")
 
-# 1. Obtener el tiempo exacto actual
 hoy = datetime.date.today()
-fin_estimado = hoy + datetime.timedelta(days=30) # Por defecto selecciona 30 días
+fin_estimado = hoy + datetime.timedelta(days=30)
 
-# Al poner "value=(hoy, fin_estimado)", se activa el calendario de rango (Inicio - Fin)
 periodo_presupuesto = st.sidebar.date_input(
     "📅 Período de Ejecución",
     value=(hoy, fin_estimado)
@@ -331,34 +569,27 @@ periodo_presupuesto = st.sidebar.date_input(
 
 presupuesto_tope = st.sidebar.number_input("Presupuesto / Límite de Gastos ($)", min_value=0.0, value=500000.0, step=50000.0)
 
-# --- 2. LÓGICA DE TIEMPO FINALIZADO Y ALERTA ---
-# Comprobamos que el usuario haya seleccionado dos fechas (inicio y fin)
 if isinstance(periodo_presupuesto, tuple) and len(periodo_presupuesto) == 2:
     fecha_fin = periodo_presupuesto[1]
-    
-    # Comparamos el tiempo exacto: ¿El día de hoy ya superó la fecha límite del presupuesto?
+
     if hoy > fecha_fin:
-        # Si ya se acabó el tiempo, y NO le hemos dado al botón de omitir:
         if not st.session_state.omitir_alerta_presupuesto:
-            # Creamos un aviso pequeño en el menú lateral
             with st.sidebar.container():
                 st.warning("⚠️ **¡Tiempo finalizado!**\n\nEl período de tu presupuesto ha terminado. Por favor, asigna uno nuevo.")
                 if st.button("Omitir por ahora"):
-                    # Si oprime omitir, lo guardamos en la memoria y recargamos
                     st.session_state.omitir_alerta_presupuesto = True
                     st.rerun()
     else:
-        # Si el presupuesto sigue vigente o se actualizó, nos aseguramos de quitar la alerta
         st.session_state.omitir_alerta_presupuesto = False
 
 st.sidebar.markdown("---")
 menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
-    "1. Inicio", 
-    "2. Registro de Ingresos", 
-    "3. Registro de Gastos", 
-    "4. Balance Financiero", 
-    "5. Dashboard y Gráficos", 
-    "6. Anexo de Recibos & QR", 
+    "1. Inicio",
+    "2. Registro de Ingresos",
+    "3. Registro de Gastos",
+    "4. Balance Financiero",
+    "5. Dashboard y Gráficos",
+    "6. Anexo de Recibos & QR",
     "7. Gestión de Archivos",
     "8. Reporte Final",
     "9. Auditoría del Sistema",
@@ -374,7 +605,7 @@ if st.session_state.ia_abierta:
         st.markdown("### 🧠 Chat Asesor IA")
         api_key_input = st.text_input("Clave de API Gemini:", type="password", key="api_key_ia")
         pregunta_ia = st.text_input("¿Qué deseas consultar?")
-        
+
         if st.button("Consultar IA"):
             if not api_key_input:
                 st.error("⚠️ Introduce tu clave de API.")
@@ -382,14 +613,14 @@ if st.session_state.ia_abierta:
                 try:
                     from google import genai
                     client = genai.Client(api_key=api_key_input)
-                    
+
                     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
                     tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
                     saldo = tot_ing - tot_gas
-                    
+
                     contexto = f"Datos del proyecto: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
-                    
+
                     response = client.models.generate_content(
                         model="gemini-3.6-flash",
                         contents=prompt_completo,
@@ -400,13 +631,13 @@ if st.session_state.ia_abierta:
                     st.error(f"Error con la IA: {e}")
 
 # --- RUTAS DE LAS PÁGINAS ---
-import datetime # Asegúrate de que esto esté arriba
+import datetime
 
 if menu == "1. Inicio":
     st.markdown('<p class="main-header">🏛️ Proyecto de Control y Gestión Financiera</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Plataforma centralizada para la administración y supervisión de recursos</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
+
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("### 🎯 Objetivo del Sistema")
@@ -422,24 +653,22 @@ if menu == "1. Inicio":
 elif menu == "2. Registro de Ingresos":
     st.markdown('<p class="main-header">📈 Registro de Ingresos</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
+
     with st.expander("➕ Agregar Nuevo Ingreso", expanded=True):
         with st.form("form_nuevo_ingreso"):
             c1, c2 = st.columns(2)
             with c1:
-                # CORRECCIÓN AQUÍ
                 f_ing = st.date_input("Fecha", value=datetime.date.today())
                 con_ing = st.text_input("Concepto")
             with c2:
                 resp_ing = st.selectbox("Responsable", INTEGRANTES_LISTA)
                 val_ing = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
             obs_ing = st.text_area("Observaciones (Opcional)")
-            
+
             if st.form_submit_button("Guardar Ingreso"):
                 if con_ing.strip() == "":
                     st.error("⚠️ El concepto no puede estar vacío.")
                 else:
-                    # CORRECCIÓN AQUÍ
                     reg_id = f"ING-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                     nuevo_reg = {
                         "ID": reg_id,
@@ -451,21 +680,24 @@ elif menu == "2. Registro de Ingresos":
                     }
                     st.session_state.ingresos_df = pd.concat([st.session_state.ingresos_df, pd.DataFrame([nuevo_reg])], ignore_index=True)
                     guardar_registro_nube('ingresos', nuevo_reg)
+                    registrar_auditoria("Registró Ingreso", f"{con_ing} - ${val_ing:,.0f} (Responsable: {resp_ing})")
                     st.success("¡Ingreso guardado en la nube!")
                     st.rerun()
 
     if not st.session_state.ingresos_df.empty:
         st.dataframe(st.session_state.ingresos_df.drop(columns=['ID']), use_container_width=True)
         st.metric("💵 TOTAL INGRESOS", f"${st.session_state.ingresos_df['Valor'].astype(float).sum():,.0f} COP")
-        
+
         st.markdown("### 🗑️ Eliminar Ingreso")
         opciones = [f"{row['Concepto']} - ${row['Valor']:,.0f}" for _, row in st.session_state.ingresos_df.iterrows()]
         seleccion = st.selectbox("Selecciona para eliminar:", opciones)
-        
+
         if st.button("❌ Eliminar Ingreso"):
             idx = opciones.index(seleccion)
-            doc_id = st.session_state.ingresos_df.iloc[idx]['ID']
+            fila = st.session_state.ingresos_df.iloc[idx]
+            doc_id = fila['ID']
             eliminar_registro_nube('ingresos', doc_id)
+            registrar_auditoria("Eliminó Ingreso", f"{fila['Concepto']} - ${float(fila['Valor']):,.0f}")
             st.session_state.ingresos_df = st.session_state.ingresos_df.drop(idx).reset_index(drop=True)
             st.success("Ingreso eliminado.")
             st.rerun()
@@ -473,7 +705,7 @@ elif menu == "2. Registro de Ingresos":
 elif menu == "3. Registro de Gastos":
     st.markdown('<p class="main-header">📉 Registro de Gastos</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
+
     current_total_gastos = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
     if presupuesto_tope > 0 and current_total_gastos > presupuesto_tope:
         st.error(f"🚨 ¡ATENCIÓN! Has superado el límite de ${presupuesto_tope:,.0f} COP.")
@@ -484,19 +716,17 @@ elif menu == "3. Registro de Gastos":
         with st.form("form_nuevo_gasto"):
             c1, c2 = st.columns(2)
             with c1:
-                # CORRECCIÓN AQUÍ
                 f_gas = st.date_input("Fecha Gasto", value=datetime.date.today())
                 con_gas = st.text_input("Concepto")
                 cat_gas = st.selectbox("Categoría", ["Logística", "Publicidad", "Alimentación", "Varios"])
             with c2:
                 val_gas = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
                 resp_gas = st.selectbox("Responsable", INTEGRANTES_LISTA)
-            
+
             if st.form_submit_button("Guardar Gasto"):
                 if con_gas.strip() == "":
                     st.error("⚠️ El concepto no puede estar vacío.")
                 else:
-                    # CORRECCIÓN AQUÍ
                     reg_id = f"GAS-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                     nuevo_reg = {
                         "ID": reg_id,
@@ -508,6 +738,7 @@ elif menu == "3. Registro de Gastos":
                     }
                     st.session_state.gastos_df = pd.concat([st.session_state.gastos_df, pd.DataFrame([nuevo_reg])], ignore_index=True)
                     guardar_registro_nube('gastos', nuevo_reg)
+                    registrar_auditoria("Registró Gasto", f"{con_gas} - ${val_gas:,.0f} (Categoría: {cat_gas}, Responsable: {resp_gas})")
                     st.success("¡Gasto guardado en la nube!")
                     st.rerun()
 
@@ -518,22 +749,24 @@ elif menu == "3. Registro de Gastos":
         st.markdown("### 🗑️ Eliminar Gasto")
         opciones = [f"{row['Concepto']} - ${row['Valor']:,.0f}" for _, row in st.session_state.gastos_df.iterrows()]
         seleccion = st.selectbox("Selecciona para eliminar:", opciones)
-        
+
         if st.button("❌ Eliminar Gasto"):
             idx = opciones.index(seleccion)
-            doc_id = st.session_state.gastos_df.iloc[idx]['ID']
+            fila = st.session_state.gastos_df.iloc[idx]
+            doc_id = fila['ID']
             eliminar_registro_nube('gastos', doc_id)
+            registrar_auditoria("Eliminó Gasto", f"{fila['Concepto']} - ${float(fila['Valor']):,.0f}")
             st.session_state.gastos_df = st.session_state.gastos_df.drop(idx).reset_index(drop=True)
             st.success("Gasto eliminado.")
             st.rerun()
 elif menu == "4. Balance Financiero":
     st.markdown('<p class="main-header">⚖️ Balance Financiero General</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
+
     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
     tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
     saldo = tot_ing - tot_gas
-    
+
     c1, c2, c3 = st.columns(3)
     c1.metric("💵 Ingresos", f"${tot_ing:,.0f} COP")
     c2.metric("💸 Gastos", f"${tot_gas:,.0f} COP")
@@ -542,11 +775,10 @@ elif menu == "4. Balance Financiero":
 elif menu == "5. Dashboard y Gráficos":
     st.markdown('<p class="main-header">📊 Dashboard Interactivo</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
-    # Conversión segura a numérico para evitar errores
+
     tot_ing = pd.to_numeric(st.session_state.ingresos_df["Valor"], errors='coerce').sum() if not st.session_state.ingresos_df.empty else 0.0
     tot_gas = pd.to_numeric(st.session_state.gastos_df["Valor"], errors='coerce').sum() if not st.session_state.gastos_df.empty else 0.0
-    
+
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("#### Ingresos vs Gastos")
@@ -564,7 +796,7 @@ elif menu == "5. Dashboard y Gráficos":
             st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("No hay gastos registrados aún.")
-  
+
     st.markdown("#### 📈 Evolución Temporal de Movimientos")
     df_all = []
     if not st.session_state.ingresos_df.empty:
@@ -572,18 +804,18 @@ elif menu == "5. Dashboard y Gráficos":
         df_i["Valor"] = pd.to_numeric(df_i["Valor"], errors='coerce').fillna(0)
         df_i["Tipo"] = "Ingreso"
         df_all.append(df_i)
-        
+
     if not st.session_state.gastos_df.empty:
         df_g = st.session_state.gastos_df[["Fecha", "Valor"]].copy()
         df_g["Valor"] = pd.to_numeric(df_g["Valor"], errors='coerce').fillna(0)
         df_g["Tipo"] = "Gasto"
         df_all.append(df_g)
-        
+
     if df_all:
         df_timeline = pd.concat(df_all, ignore_index=True)
         df_timeline["Fecha"] = pd.to_datetime(df_timeline["Fecha"], errors='coerce')
         df_timeline = df_timeline.dropna(subset=["Fecha"]).sort_values("Fecha")
-        
+
         if not df_timeline.empty:
             fig_line = px.line(df_timeline, x="Fecha", y="Valor", color="Tipo", markers=True, color_discrete_map={"Ingreso": "#10B981", "Gasto": "#EF4444"})
             st.plotly_chart(fig_line, use_container_width=True)
@@ -602,24 +834,23 @@ elif menu == "6. Anexo de Recibos & QR":
         saldo = tot_ing - tot_gas
         rec_id = f"GEN-{datetime.now().strftime('%Y%m%d%H%M')}"
         fecha_actual = datetime.now().strftime('%Y-%m-%d')
-        
+
         texto_recibo = f"COMPROBANTE {rec_id}\nInstitucion: Colegio Francisco de Paula Santander\nIngresos: ${tot_ing:,.0f}\nGastos: ${tot_gas:,.0f}\nSaldo: ${saldo:,.0f}"
         qr = qrcode.QRCode(box_size=10, border=2)
         qr.add_data(texto_recibo)
         qr.make(fit=True)
         qr_img_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-        
-        # Llamar a la función robusta de generación de imagen decorada
+
         buffer_recibo = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, qr_img_pil)
         st.session_state.rec_img_bytes = buffer_recibo.getvalue()
         st.success("✅ ¡Comprobante generado exitosamente!")
-        
+
     if 'rec_img_bytes' in st.session_state:
         st.image(st.session_state.rec_img_bytes, width=450)
         st.download_button(
-            "📥 Descargar Comprobante PNG", 
-            data=st.session_state.rec_img_bytes, 
-            file_name="Comprobante_Financiero.png", 
+            "📥 Descargar Comprobante PNG",
+            data=st.session_state.rec_img_bytes,
+            file_name="Comprobante_Financiero.png",
             mime="image/png"
         )
 
@@ -627,20 +858,21 @@ elif menu == "7. Gestión de Archivos":
     st.markdown('<p class="main-header">📁 Repositorio de Documentos</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Registra, administra y visualiza los comprobantes del proyecto.</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
+
     import base64
 
     with st.form("form_subir_archivo"):
         archivo_subido = st.file_uploader("Sube tu archivo (PDF, PNG, JPG)", type=["png", "jpg", "jpeg", "pdf"])
         descripcion_archivo = st.text_input("Descripción o Nota del Documento")
         submit_archivo = st.form_submit_button("💾 Guardar y Registrar Archivo")
-        
+
         if submit_archivo and db:
             if archivo_subido is not None:
                 bytes_archivo = archivo_subido.getvalue()
                 base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
-                
+
                 nombre_id = f"ARCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                institucion_id = get_institucion_id()
                 doc_data = {
                     "ID": nombre_id,
                     "nombre": archivo_subido.name,
@@ -650,7 +882,8 @@ elif menu == "7. Gestión de Archivos":
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
                 }
-                db.collection("archivos").document(nombre_id).set(doc_data)
+                db.collection("usuarios").document(institucion_id).collection("archivos").document(nombre_id).set(doc_data)
+                registrar_auditoria("Subió Archivo", f"{archivo_subido.name} — {descripcion_archivo or 'Sin descripción'}")
                 st.success("✅ ¡Archivo guardado exitosamente en la base de datos!")
                 st.rerun()
             else:
@@ -659,24 +892,24 @@ elif menu == "7. Gestión de Archivos":
     st.markdown("### 📋 Archivos Registrados con Vista Previa")
     if db:
         try:
-            archivos_ref = db.collection("archivos").stream()
+            institucion_id = get_institucion_id()
+            archivos_ref = db.collection("usuarios").document(institucion_id).collection("archivos").stream()
             archivos_lista = [a.to_dict() for a in archivos_ref]
-            
+
             if archivos_lista:
                 for row in archivos_lista:
                     with st.expander(f"📄 {row['nombre']} — ({row['fecha']})"):
                         st.write(f"**Descripción:** {row['descripcion']}")
                         st.write(f"**Subido por:** {row['subido_por']}")
-                        
+
                         if "archivo_b64" in row:
                             b64_bytes = base64.b64decode(row['archivo_b64'])
-                            
-                            # Mostrar mini recuadro de vista previa si es imagen
+
                             if row['tipo'].startswith('image/'):
                                 st.image(b64_bytes, caption="Vista previa", width=250)
                             elif row['tipo'] == 'application/pdf':
                                 st.info("📎 Archivo PDF (Usa el botón de abajo para descargarlo y abrirlo)")
-                            
+
                             st.download_button(
                                 label=f"📥 Descargar / Abrir {row['nombre']}",
                                 data=b64_bytes,
@@ -684,16 +917,18 @@ elif menu == "7. Gestión de Archivos":
                                 mime=row['tipo'],
                                 key=f"dl_{row['ID']}"
                             )
-                
+
                 st.markdown("---")
                 st.markdown("### 🗑️ Eliminar Registro de Archivo")
                 opciones_arch = [f"{row['nombre']} ({row['fecha']})" for row in archivos_lista]
                 sel_arch = st.selectbox("Selecciona archivo a eliminar:", opciones_arch)
-                
+
                 if st.button("❌ Eliminar Registro"):
                     idx = opciones_arch.index(sel_arch)
-                    doc_id_eliminar = archivos_lista[idx]['ID']
-                    db.collection("archivos").document(doc_id_eliminar).delete()
+                    archivo_a_eliminar = archivos_lista[idx]
+                    doc_id_eliminar = archivo_a_eliminar['ID']
+                    db.collection("usuarios").document(institucion_id).collection("archivos").document(doc_id_eliminar).delete()
+                    registrar_auditoria("Eliminó Archivo", archivo_a_eliminar['nombre'])
                     st.success("Registro eliminado correctamente.")
                     st.rerun()
             else:
@@ -706,7 +941,7 @@ elif menu == "8. Reporte Final":
     st.markdown('<p class="main-header">📑 Reporte Financiero Profesional</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Genera y descarga un libro de Excel con diseño institucional avanzado.</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
+
     if st.button("📊 Generar Excel Profesional"):
         import openpyxl
         import pandas as pd
@@ -720,32 +955,31 @@ elif menu == "8. Reporte Final":
         HEADER_FONT = Font(name="Arial", size=11, bold=True, color="FFFFFF")
         TITLE_FONT = Font(name="Arial", size=16, bold=True, color="1E3A8A")
         REGULAR_FONT = Font(name="Arial", size=10, color="333333")
-        
+
         THIN_BORDER = Border(
             left=Side(style='thin', color='CBD5E1'),
             right=Side(style='thin', color='CBD5E1'),
             top=Side(style='thin', color='CBD5E1'),
             bottom=Side(style='thin', color='CBD5E1')
         )
-        
+
         zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
 
-        # Obtener el nombre del usuario logueado dinámicamente
         nombre_usuario = st.session_state.user_data.get('institucion', 'Institución Financiera')
 
         def estilizar_hoja(ws, titulo_base, df):
             titulo_completo = f"{nombre_usuario.upper()} - {titulo_base}"
             ws.append([titulo_completo])
-            ws.append([]) 
+            ws.append([])
             ws.cell(row=1, column=1).font = TITLE_FONT
-            
+
             if df.empty:
                 ws.append(["No hay registros disponibles."])
                 return
 
             headers = [col for col in df.columns if col != 'ID']
             ws.append(headers)
-            
+
             for col_num in range(1, len(headers) + 1):
                 cell = ws.cell(row=3, column=col_num)
                 cell.fill = HEADER_FILL
@@ -756,17 +990,17 @@ elif menu == "8. Reporte Final":
             for row_idx, row in df.iterrows():
                 fila_datos = [row[col] for col in headers]
                 ws.append(fila_datos)
-                
+
                 current_row = ws.max_row
                 is_zebra = (row_idx % 2 != 0)
-                
+
                 for col_num in range(1, len(headers) + 1):
                     cell = ws.cell(row=current_row, column=col_num)
                     cell.font = REGULAR_FONT
                     cell.border = THIN_BORDER
                     if is_zebra:
                         cell.fill = zebra_fill
-                        
+
                     if headers[col_num - 1] == "Valor" and isinstance(cell.value, (int, float)):
                         cell.number_format = '"$"#,##0'
                         cell.alignment = Alignment(horizontal="right", vertical="center")
@@ -781,32 +1015,26 @@ elif menu == "8. Reporte Final":
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
-        # --- CÁLCULO DEL BALANCE GENERAL ---
         df_ing = st.session_state.ingresos_df
         df_gas = st.session_state.gastos_df
-        
-        # Extraer sumatorias (asegurando que sean 0 si la tabla está vacía)
+
         total_ingresos = float(df_ing['Valor'].sum()) if not df_ing.empty and 'Valor' in df_ing.columns else 0.0
         total_gastos = float(df_gas['Valor'].sum()) if not df_gas.empty and 'Valor' in df_gas.columns else 0.0
         balance_neto = total_ingresos - total_gastos
-        
+
         estado = "Superávit (Ganancia)" if balance_neto >= 0 else "Déficit (Pérdida)"
 
-        # Crear un mini dataframe para la tabla del Balance
         df_balance = pd.DataFrame({
             "Concepto": ["Total Ingresos Recaudados", "Total Gastos Ejecutados", f"Balance Neto: {estado}"],
             "Valor": [total_ingresos, total_gastos, balance_neto]
         })
 
-        # 1. Hoja de Balance General (index=0 hace que sea la primera hoja)
         ws_bal = wb.create_sheet(title="Balance General", index=0)
         estilizar_hoja(ws_bal, "RESUMEN DE BALANCE GENERAL", df_balance)
 
-        # 2. Hoja de Ingresos
         ws_ing = wb.create_sheet(title="Ingresos")
         estilizar_hoja(ws_ing, "REPORTE DE INGRESOS", df_ing)
 
-        # 3. Hoja de Gastos
         ws_gas = wb.create_sheet(title="Gastos")
         estilizar_hoja(ws_gas, "REPORTE DE GASTOS", df_gas)
 
@@ -816,48 +1044,41 @@ elif menu == "8. Reporte Final":
     if os.path.exists(EXCEL_FILE):
         with open(EXCEL_FILE, "rb") as f:
             st.download_button(
-                "📥 Descargar Archivo Excel Profesional", 
-                data=f, 
-                file_name="Reporte_Financiero.xlsx", 
+                "📥 Descargar Archivo Excel Profesional",
+                data=f,
+                file_name="Reporte_Financiero.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 elif menu == "9. Auditoría del Sistema":
+    # --------------------------------------------------------------------------------
+    # REQUISITO 2 (vista): ya no depende de una contraseña hardcodeada. El acceso está
+    # controlado por el login (cada institución solo puede leer su propia subcolección
+    # usuarios/{institucion_id}/auditoria), que es exactamente el aislamiento pedido en
+    # el requisito 1. Cualquier usuario autenticado ve su propio historial en tiempo real.
+    # --------------------------------------------------------------------------------
     st.markdown('<p class="main-header">🔐 Auditoría y Registro de Actividad (Logs)</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Historial de control y seguridad institucional.</p>', unsafe_allow_html=True)
     st.markdown("---")
-    
-    # Campo de contraseña protegido
-    pwd_ingresada = st.text_input("🔑 Introduce la contraseña de acceso exclusivo:", type="password")
-    
-    if pwd_ingresada == "El amor que vale 123":
-        st.success("✅ Acceso autorizado al módulo de auditoría.")
-        st.markdown("---")
-        
-        if db:
-            try:
-                logs_ref = db.collection("auditoria").stream()
-                logs_lista = [l.to_dict() for l in logs_ref]
-                
-                if logs_lista:
-                    df_logs = pd.DataFrame(logs_lista)
-                    st.dataframe(df_logs, use_container_width=True, hide_index=True)
-                else:
-                    usuario_actual = st.session_state.user_data.get('institucion', 'Usuario')
-                    log_inicial = {
-                        "Fecha": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                        "Usuario": usuario_actual,
-                        "Acción": "Acceso verificado al portal financiero",
-                        "Módulo": "Autenticación"
-                    }
-                    db.collection("auditoria").document(f"LOG-{datetime.now().strftime('%Y%m%d%H%M%S')}").set(log_inicial)
-                    st.success("Se ha inicializado el registro de auditoría con tu sesión actual.")
-                    st.rerun()
-            except Exception as e:
-                st.warning(f"No se pudieron cargar los registros de auditoría: {e}")
-        else:
-            st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
-            
-    elif pwd_ingresada != "":
-        st.error("❌ Contraseña incorrecta. Acceso restringido.")
+
+    if db:
+        try:
+            institucion_id = get_institucion_id()
+            logs_ref = (
+                db.collection("usuarios").document(institucion_id)
+                .collection("auditoria")
+                .order_by("fecha_hora", direction=firestore.Query.DESCENDING)
+                .stream()
+            )
+            logs_lista = [l.to_dict() for l in logs_ref]
+
+            if logs_lista:
+                df_logs = pd.DataFrame(logs_lista)
+                columnas_orden = [c for c in ["fecha_hora", "usuario", "accion", "detalle"] if c in df_logs.columns]
+                otras = [c for c in df_logs.columns if c not in columnas_orden]
+                st.dataframe(df_logs[columnas_orden + otras], use_container_width=True, hide_index=True)
+            else:
+                st.info("🔒 Aún no hay movimientos registrados para tu institución. Las acciones (ingresos, gastos, archivos) se registrarán aquí automáticamente.")
+        except Exception as e:
+            st.warning(f"No se pudieron cargar los registros de auditoría: {e}")
     else:
-        st.info("🔒 Esta sección se encuentra protegida. Ingresa la contraseña asignada para visualizar los registros.")
+        st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
