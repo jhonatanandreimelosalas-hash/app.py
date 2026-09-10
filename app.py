@@ -35,8 +35,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- INICIALIZACIÓN DE FIREBASE ---
-# IMPORTANTE: Reemplaza 'tu-proyecto.appspot.com' por el enlace de tu Firebase Storage
-FIREBASE_STORAGE_BUCKET = 'tu-proyecto.appspot.com' 
+FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com' 
 
 if not firebase_admin._apps:
     try:
