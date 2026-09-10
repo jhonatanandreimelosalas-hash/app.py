@@ -39,12 +39,22 @@ FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com'
 
 if not firebase_admin._apps:
     try:
-        cred = credentials.Certificate('firebase_key.json')
+        # Intenta leer credenciales desde los Secrets de Streamlit Cloud
+        if "firebase" in st.secrets:
+            cred_dict = dict(st.secrets["firebase"])
+            cred = credentials.Certificate(cred_dict)
+        # Si no detecta Secrets, busca el archivo local
+        elif os.path.exists('firebase_key.json'):
+            cred = credentials.Certificate('firebase_key.json')
+        else:
+            st.error("⚠️ No se encontraron credenciales de Firebase en Secrets ni en firebase_key.json.")
+            st.stop()
+            
         firebase_admin.initialize_app(cred, {
             'storageBucket': FIREBASE_STORAGE_BUCKET
         })
     except Exception as e:
-        st.error(f"⚠️ Error al conectar con Firebase. Verifica que 'firebase_key.json' esté en la carpeta. Error: {e}")
+        st.error(f"⚠️ Error al conectar con Firebase: {e}")
 
 db = firestore.client() if firebase_admin._apps else None
 bucket = storage.bucket() if firebase_admin._apps else None
