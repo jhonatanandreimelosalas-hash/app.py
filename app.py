@@ -61,9 +61,7 @@ bucket = storage.bucket() if firebase_admin._apps else None
 # --- DATOS GLOBALES ---
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 INTEGRANTES_LISTA = [
-    "Saray Medina",
-    "Sahra Sofia Águila Vargas",
-    "Shara Aguilar",
+    "Jhonnattan Andrei Melo Salas",
     "Nicol Stefani Vanegas Cruz",
     "Luis Alejandro Martínez Rubio",
     "Iván Santiago Valencia Villamil"
