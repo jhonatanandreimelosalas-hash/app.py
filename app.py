@@ -169,7 +169,6 @@ if not st.session_state.logged_in:
                 elif not inst_name or not email_reg:
                     st.error("Todos los campos son obligatorios.")
                 else:
-                    # Verificar si existe el correo o el nombre
                     email_exists = db.collection('usuarios').document(email_reg.lower()).get().exists
                     name_query = db.collection('usuarios').where('institucion', '==', inst_name).get()
                     
@@ -199,9 +198,7 @@ if not st.session_state.logged_in:
                 else:
                     st.error("El correo no está registrado en nuestra base de datos.")
     
-    st.stop() # Detiene la ejecución aquí si no ha iniciado sesión
-
-# --- A PARTIR DE AQUÍ EL USUARIO ESTÁ LOGUEADO ---
+    st.stop()
 
 # --- MENÚ LATERAL ---
 st.sidebar.markdown(f"👋 **Hola, {st.session_state.user_data['institucion']}**")
@@ -254,7 +251,7 @@ if st.session_state.ia_abierta:
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
                     response = client.models.generate_content(
-                        model="gemini-3.6-flash",
+                        model="gemini-2.5-flash",
                         contents=prompt_completo,
                     )
                     st.success("Respuesta:")
@@ -424,7 +421,6 @@ elif menu == "6. Anexo de Recibos & QR":
     st.info("💡 Haz clic para generar el comprobante con código QR.")
 
     if st.button("🚀 Generar Comprobante"):
-        # Misma lógica de imagen de tu código original...
         tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
         tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
         saldo = tot_ing - tot_gas
@@ -468,17 +464,14 @@ elif menu == "7. Gestión de Archivos":
                 nombre_archivo = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{archivo_subido.name}"
                 blob = bucket.blob(f"documentos/{nombre_archivo}")
                 
-                # Subir archivo original
                 file_bytes = archivo_subido.getvalue()
                 blob.upload_from_string(file_bytes, content_type=archivo_subido.type)
                 blob.make_public()
                 
-                # Lógica de miniatura
                 url_miniatura = blob.public_url
                 es_pdf = archivo_subido.type == "application/pdf"
                 
                 if es_pdf:
-                    # Crear miniatura del PDF
                     miniatura_bytes = generar_miniatura_pdf(file_bytes)
                     if miniatura_bytes:
                         blob_min = bucket.blob(f"miniaturas/{nombre_archivo}.jpg")
@@ -486,7 +479,6 @@ elif menu == "7. Gestión de Archivos":
                         blob_min.make_public()
                         url_miniatura = blob_min.public_url
                 
-                # Guardar referencia en Firestore
                 doc_data = {
                     "nombre": archivo_subido.name,
                     "url_archivo": blob.public_url,
@@ -497,14 +489,14 @@ elif menu == "7. Gestión de Archivos":
                 }
                 db.collection("archivos").document(nombre_archivo).set(doc_data)
                 st.success("✅ Archivo subido y guardado exitosamente.")
-                
+            
     st.markdown("### 🖼️ Galería de Archivos Guardados")
     if db:
         archivos_ref = db.collection("archivos").stream()
         archivos_lista = [a.to_dict() for a in archivos_ref]
         
         if archivos_lista:
-            columnas = st.columns(4) # Grid de 4 columnas
+            columnas = st.columns(4)
             for i, arch in enumerate(archivos_lista):
                 with columnas[i % 4]:
                     st.markdown('<div class="file-card">', unsafe_allow_html=True)
@@ -527,4 +519,4 @@ elif menu == "8. Reporte Final":
         st.session_state.gastos_df.drop(columns=['ID'], errors='ignore').to_excel(writer, sheet_name='Gastos', index=False)
     
     with open(EXCEL_FILE, "rb") as f:
-        st.download_button("⬇️ Descargar Backup Excel", data=f, file_name="Proyecto_Financiero_Cloud.xlsx")
+        st.download_button("⬇️ Descargar Backup Excel", data=f, file_name="Proyecto_Financiero_Cloud.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
