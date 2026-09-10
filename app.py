@@ -318,7 +318,8 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "5. Dashboard y Gráficos", 
     "6. Anexo de Recibos & QR", 
     "7. Gestión de Archivos",
-    "8. Reporte Final"
+    "8. Reporte Final",
+    "9. Indicadores y Dashboard",
 ])
 
 # --- APARTADO DE IA EN EL BORDE ---
