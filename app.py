@@ -1,4 +1,5 @@
 import streamlit as st
+from streamlit.components.v1 import html
 import pandas as pd
 import openpyxl
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
@@ -16,8 +17,8 @@ from firebase_admin import credentials, firestore, storage
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
-    page_title="Gestión Financiera - Colegio Francisco de Paula Santander", 
-    page_icon="💰", 
+    page_title="Gestión Financiera - Colegio Francisco de Paula Santander",
+    page_icon="💰",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -35,13 +36,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # --- INICIALIZACIÓN DE FIREBASE ---
-FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com' 
+FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com'
 
 if not firebase_admin._apps:
     try:
         if "firebase" in st.secrets:
             cred_dict = dict(st.secrets["firebase"])
-            # Reemplaza caracteres escapados por saltos de línea reales
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
             cred = credentials.Certificate(cred_dict)
         elif os.path.exists('firebase_key.json'):
@@ -58,6 +58,7 @@ if not firebase_admin._apps:
 
 db = firestore.client() if firebase_admin._apps else None
 bucket = storage.bucket() if firebase_admin._apps else None
+
 # --- DATOS GLOBALES ---
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 INTEGRANTES_LISTA = [
@@ -90,13 +91,11 @@ def verify_password(password, hashed):
 def cargar_datos_nube():
     if not db: return
     try:
-        # Cargar Ingresos
         ing_docs = db.collection('ingresos').stream()
         ing_data = [doc.to_dict() for doc in ing_docs]
         if ing_data:
             st.session_state.ingresos_df = pd.DataFrame(ing_data)
         
-        # Cargar Gastos
         gas_docs = db.collection('gastos').stream()
         gas_data = [doc.to_dict() for doc in gas_docs]
         if gas_data:
@@ -122,8 +121,8 @@ def eliminar_registro_nube(coleccion, doc_id):
 def generar_miniatura_pdf(file_bytes):
     try:
         doc = fitz.open(stream=file_bytes, filetype="pdf")
-        page = doc.load_page(0)  # Primera página
-        pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5)) # Reducir resolución para miniatura
+        page = doc.load_page(0)
+        pix = page.get_pixmap(matrix=fitz.Matrix(0.5, 0.5))
         img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
         
         buf = BytesIO()
@@ -134,27 +133,14 @@ def generar_miniatura_pdf(file_bytes):
 
 # --- PANTALLAS DE AUTENTICACIÓN ---
 if not st.session_state.logged_in:
-    st.markdown(
-        '<p class="main-header" style="text-align: center;">🏛️ Portal'
-        " Financiero Institucional</p>",
-        unsafe_allow_html=True,
-    )
-    st.markdown(
-        '<p class="sub-header" style="text-align: center;">Colegio Francisco'
-        " de Paula Santander</p>",
-        unsafe_allow_html=True,
-    )
-
-    tab1, tab2, tab3 = st.tabs(
-        ["Iniciar Sesión", "Crear Cuenta", "Olvidé mi Contraseña"]
-    )
-
+    st.markdown('<p class="main-header" style="text-align: center;">🏛️ Portal Financiero Institucional</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header" style="text-align: center;">Colegio Francisco de Paula Santander</p>', unsafe_allow_html=True)
+    
+    tab1, tab2, tab3 = st.tabs(["Iniciar Sesión", "Crear Cuenta", "Olvidé mi Contraseña"])
+    
     with tab1:
         st.markdown("### Acceso Institucional con Google")
-        st.write(
-            "Usa tu cuenta autorizada para acceder de forma segura sin"
-            " contraseñas."
-        )
+        st.write("Usa tu cuenta autorizada para acceder de forma segura sin contraseñas.")
 
         auth_html = """
         <!DOCTYPE html>
@@ -233,13 +219,9 @@ if not st.session_state.logged_in:
                     "institucion": email_ingresado.split("@")[0].capitalize(),
                     "email": email_ingresado,
                     "password": "GOOGLE_AUTH",
-                    "fecha_creacion": datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
+                    "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 }
-                db.collection("usuarios").document(email_ingresado).set(
-                    nuevo_usuario
-                )
+                db.collection("usuarios").document(email_ingresado).set(nuevo_usuario)
                 st.session_state.logged_in = True
                 st.session_state.user_data = nuevo_usuario
                 cargar_datos_nube()
@@ -254,9 +236,7 @@ if not st.session_state.logged_in:
                 submit_login = st.form_submit_button("Entrar con Contraseña")
 
                 if submit_login and db:
-                    user_ref = db.collection("usuarios").document(
-                        email_login.lower()
-                    )
+                    user_ref = db.collection("usuarios").document(email_login.lower())
                     user_doc = user_ref.get()
                     if user_doc.exists:
                         user_data = user_doc.to_dict()
@@ -275,88 +255,46 @@ if not st.session_state.logged_in:
         with st.form("register_form"):
             inst_name = st.text_input("Nombre de la Institución / Persona")
             email_reg = st.text_input("Correo Electrónico")
-            pass_reg = st.text_input(
-                "Contraseña (Min. 6 caracteres, 1 mayúscula)", type="password"
-            )
+            pass_reg = st.text_input("Contraseña (Min. 6 caracteres, 1 mayúscula)", type="password")
             submit_reg = st.form_submit_button("Registrar Cuenta")
-
+            
             if submit_reg and db:
-                if len(pass_reg) < 6 or not any(
-                    c.isupper() for c in pass_reg
-                ):
-                    st.error(
-                        "La contraseña debe tener al menos 6 caracteres y 1"
-                        " letra mayúscula."
-                    )
+                if len(pass_reg) < 6 or not any(c.isupper() for c in pass_reg):
+                    st.error("La contraseña debe tener al menos 6 caracteres y 1 letra mayúscula.")
                 elif not inst_name or not email_reg:
                     st.error("Todos los campos son obligatorios.")
                 else:
-                    email_exists = (
-                        db.collection("usuarios")
-                        .document(email_reg.lower())
-                        .get()
-                        .exists
-                    )
-                    name_query = (
-                        db.collection("usuarios")
-                        .where("institucion", "==", inst_name)
-                        .get()
-                    )
-
+                    email_exists = db.collection('usuarios').document(email_reg.lower()).get().exists
+                    name_query = db.collection('usuarios').where('institucion', '==', inst_name).get()
+                    
                     if email_exists:
-                        st.error(
-                            "Ya existe una cuenta con este correo electrónico."
-                        )
+                        st.error("Ya existe una cuenta con este correo electrónico.")
                     elif len(name_query) > 0:
-                        st.error(
-                            "Ya existe una cuenta con este nombre de"
-                            " institución/persona."
-                        )
+                        st.error("Ya existe una cuenta con este nombre de institución/persona.")
                     else:
                         nuevo_usuario = {
-                            "institucion": inst_name,
-                            "email": email_reg.lower(),
-                            "password": hash_password(pass_reg),
-                            "fecha_creacion": datetime.now().strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            ),
+                            'institucion': inst_name,
+                            'email': email_reg.lower(),
+                            'password': hash_password(pass_reg),
+                            'fecha_creacion': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                         }
-                        db.collection("usuarios").document(
-                            email_reg.lower()
-                        ).set(nuevo_usuario)
-                        st.success(
-                            "¡Cuenta creada exitosamente! Ya puedes iniciar"
-                            " sesión."
-                        )
+                        db.collection('usuarios').document(email_reg.lower()).set(nuevo_usuario)
+                        st.success("¡Cuenta creada exitosamente! Ya puedes iniciar sesión.")
 
     with tab3:
         with st.form("forgot_form"):
-            st.info(
-                "Ingresa tu correo y te enviaremos las instrucciones de"
-                " recuperación."
-            )
+            st.info("Ingresa tu correo y te enviaremos las instrucciones de recuperación.")
             email_forgot = st.text_input("Correo Electrónico registrado")
             submit_forgot = st.form_submit_button("Recuperar Contraseña")
-
+            
             if submit_forgot and db:
-                if (
-                    db.collection("usuarios")
-                    .document(email_forgot.lower())
-                    .get()
-                    .exists
-                ):
-                    st.success(
-                        f"✅ Se ha enviado un correo con instrucciones de"
-                        f" recuperación a {email_forgot}. (Simulación de"
-                        " sistema)"
-                    )
+                if db.collection('usuarios').document(email_forgot.lower()).get().exists:
+                    st.success(f"✅ Se ha enviado un correo con instrucciones de recuperación a {email_forgot}. (Simulación de sistema)")
                 else:
-                    st.error(
-                        "El correo no está registrado en nuestra base de"
-                        " datos."
-                    )
-
+                    st.error("El correo no está registrado en nuestra base de datos.")
+    
     st.stop()
+
 # --- MENÚ LATERAL ---
 st.sidebar.markdown(f"👋 **Hola, {st.session_state.user_data['institucion']}**")
 if st.sidebar.button("🚪 Cerrar Sesión"):
@@ -408,7 +346,7 @@ if st.session_state.ia_abierta:
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
                     response = client.models.generate_content(
-                        model="gemini-3.6-flash",
+                        model="gemini-2.5-flash",
                         contents=prompt_completo,
                     )
                     st.success("Respuesta:")
@@ -646,7 +584,7 @@ elif menu == "7. Gestión de Archivos":
                 }
                 db.collection("archivos").document(nombre_archivo).set(doc_data)
                 st.success("✅ Archivo subido y guardado exitosamente.")
-            
+        
     st.markdown("### 🖼️ Galería de Archivos Guardados")
     if db:
         archivos_ref = db.collection("archivos").stream()
