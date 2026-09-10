@@ -298,6 +298,8 @@ if not st.session_state.logged_in:
     
     st.stop()
 
+import datetime
+
 # --- MENÚ LATERAL ---
 st.sidebar.markdown(f"👋 **Hola, {st.session_state.user_data['institucion']}**")
 if st.sidebar.button("🚪 Cerrar Sesión"):
@@ -308,6 +310,16 @@ if st.sidebar.button("🚪 Cerrar Sesión"):
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚙️ **Configuración de Presupuesto**")
 presupuesto_tope = st.sidebar.number_input("Presupuesto / Límite de Gastos ($)", min_value=0.0, value=500000.0, step=50000.0)
+
+# --- NUEVO: Configuración de Fechas ---
+hoy = datetime.date.today()
+fin_estimado = hoy + datetime.timedelta(days=30) # Por defecto selecciona 30 días
+
+# Al poner "value=(hoy, fin_estimado)", se activa el calendario de rango (Inicio - Fin)
+periodo_presupuesto = st.sidebar.date_input(
+    "📅 Período de Ejecución",
+    value=(hoy, fin_estimado)
+)
 
 st.sidebar.markdown("---")
 menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
@@ -321,7 +333,6 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "8. Reporte Final",
     "9. Auditoría del Sistema",
 ])
-
 # --- APARTADO DE IA EN EL BORDE ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("🤖 **Asistente IA del Borde**")
