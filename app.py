@@ -581,7 +581,6 @@ elif menu == "7. Gestión de Archivos":
             
             if archivos_lista:
                 df_archivos = pd.DataFrame(archivos_lista)
-                # Reordenar columnas para que se vea mejor
                 cols_orden = [col for col in ["fecha", "nombre", "tipo", "descripcion", "subido_por"] if col in df_archivos.columns]
                 st.dataframe(df_archivos[cols_orden], use_container_width=True, hide_index=True)
                 
