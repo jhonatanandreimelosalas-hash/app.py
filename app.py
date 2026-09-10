@@ -319,7 +319,7 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "6. Anexo de Recibos & QR", 
     "7. Gestión de Archivos",
     "8. Reporte Final",
-    "9. Indicadores y Dashboard",
+    "9. Reporte Ejecutivo PDF",
 ])
 
 # --- APARTADO DE IA EN EL BORDE ---
@@ -754,3 +754,59 @@ elif menu == "8. Reporte Final":
                 file_name="Reporte_Financiero.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+elif menu == "9. Reporte Ejecutivo PDF":
+    st.markdown('<p class="main-header">🖨️ Generador de Reporte Ejecutivo PDF</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Vista previa del informe formal listo para impresión o guardado institucional.</p>', unsafe_allow_html=True)
+    st.markdown("---")
+    
+    inst_name = st.session_state.user_data.get('institucion', 'Institución Financiera')
+    tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
+    tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+    saldo = tot_ing - tot_gas
+    fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M')
+    
+    # HTML estilizado para el documento ejecutivo
+    html_reporte = f"""
+    <div style="font-family: Arial, sans-serif; padding: 30px; border: 2px solid #1E3A8A; border-radius: 10px; background-color: #FFFFFF; color: #333;">
+        <h2 style="color: #1E3A8A; text-align: center; margin-bottom: 5px;">INFORME FINANCIERO EJECUTIVO</h2>
+        <p style="text-align: center; color: #64748B; font-weight: bold; margin-top: 0;">{inst_name}</p>
+        <hr style="border: 1px solid #E2E8F0; margin: 20px 0;">
+        <p><b>Fecha de emisión:</b> {fecha_hoy}</p>
+        <p><b>Estado del Balance:</b> {'SUPERÁVIT' if saldo >= 0 else 'DÉFICIT'}</p>
+        
+        <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
+            <tr style="background-color: #1E3A8A; color: white;">
+                <th style="padding: 10px; text-align: left; border: 1px solid #CBD5E1;">Concepto / Indicador</th>
+                <th style="padding: 10px; text-align: right; border: 1px solid #CBD5E1;">Monto Total (COP)</th>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border: 1px solid #CBD5E1;">Total Ingresos Registrados</td>
+                <td style="padding: 8px; text-align: right; border: 1px solid #CBD5E1; color: #059669; font-weight: bold;">${tot_ing:,.0f}</td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border: 1px solid #CBD5E1;">Total Egresos / Gastos</td>
+                <td style="padding: 8px; text-align: right; border: 1px solid #CBD5E1; color: #DC2626; font-weight: bold;">${tot_gas:,.0f}</td>
+            </tr>
+            <tr style="background-color: #F8FAFC;">
+                <td style="padding: 10px; border: 1px solid #CBD5E1; font-weight: bold;">BALANCE NETO FINAL</td>
+                <td style="padding: 10px; text-align: right; border: 1px solid #CBD5E1; font-weight: bold; font-size: 1.1em;">${saldo:,.0f}</td>
+            </tr>
+        </table>
+        
+        <br><br><br>
+        <div style="display: flex; justify-content: space-between; margin-top: 50px; text-align: center;">
+            <div style="width: 45%; border-top: 1px solid #333; padding-top: 5px;">
+                <p style="margin: 0; font-weight: bold;">Elaborado por</p>
+                <p style="margin: 0; font-size: 0.9em; color: #64748B;">Saray Medina / Equipo de Proyecto</p>
+            </div>
+            <div style="width: 45%; border-top: 1px solid #333; padding-top: 5px;">
+                <p style="margin: 0; font-weight: bold;">Supervisado / Aprobado</p>
+                <p style="margin: 0; font-size: 0.9em; color: #64748B;">{inst_name}</p>
+            </div>
+        </div>
+    </div>
+    """
+    
+    st.markdown(html_reporte, unsafe_allow_html=True)
+    st.markdown("<br>", unsafe_allow_html=True)
+    st.info("💡 Para guardar este reporte como PDF, simplemente presiona las teclas **Ctrl + P** (o Cmd + P en Mac) en tu teclado y selecciona la opción **'Guardar como PDF'**.")
