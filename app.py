@@ -757,7 +757,7 @@ elif menu == "8. Reporte Final":
 
 elif menu == "10. Reporte Ejecutivo PDF":
     st.markdown('<p class="main-header">🖨️ Generador de Reporte Ejecutivo PDF</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Genera y descarga instantáneamente el informe formal en PDF.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Vista previa y descarga del informe institucional.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
     import base64
@@ -768,7 +768,6 @@ elif menu == "10. Reporte Ejecutivo PDF":
     saldo = tot_ing - tot_gas
     fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M')
     
-    # HTML completo y estilizado para el reporte
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -784,8 +783,6 @@ elif menu == "10. Reporte Ejecutivo PDF":
         th {{ background-color: #1E3A8A; color: white; padding: 10px; text-align: left; border: 1px solid #CBD5E1; }}
         td {{ padding: 8px; border: 1px solid #CBD5E1; }}
         .text-right {{ text-align: right; }}
-        .footer {{ display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }}
-        .sign-box {{ width: 45%; border-top: 1px solid #333; padding-top: 5px; display: inline-block; }}
     </style>
     </head>
     <body>
@@ -816,35 +813,27 @@ elif menu == "10. Reporte Ejecutivo PDF":
             </table>
             
             <br><br>
-            <div class="footer">
-                <div class="sign-box">
-                    <p style="margin: 0; font-weight: bold;">Elaborado por</p>
-                    <p style="margin: 0; font-size: 0.9em; color: #64748B;">Saray Medina / Equipo de Proyecto</p>
+            <div style="margin-top: 50px;">
+                <div style="float: left; width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 5px;">
+                    <b>Elaborado por</b><br><span style="color: #64748B; font-size: 0.9em;">Saray Medina</span>
                 </div>
-                <div class="sign-box" style="float: right;">
-                    <p style="margin: 0; font-weight: bold;">Supervisado / Aprobado</p>
-                    <p style="margin: 0; font-size: 0.9em; color: #64748B;">{inst_name}</p>
+                <div style="float: right; width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 5px;">
+                    <b>Supervisado / Aprobado</b><br><span style="color: #64748B; font-size: 0.9em;">{inst_name}</span>
                 </div>
+                <div style="clear: both;"></div>
             </div>
         </div>
     </body>
     </html>
     """
     
-    # Mostrar la vista previa visual en la aplicación
     st.markdown("### 👁️ Vista Previa del Informe")
-    st.components.v1.html(html_content, height=500, scrolling=True)
+    st.components.v1.html(html_content, height=480, scrolling=True)
     
     st.markdown("---")
+    st.markdown("### 📥 Descarga del Reporte")
     
-    # Generador de descarga directa usando WeasyPrint o truco HTML de descarga
-    # Como Streamlit Cloud a veces limita librerías binarias pesadas de PDF, 
-    # creamos un botón interactivo que exporta el reporte limpio.
-    st.markdown("### 📥 Descarga Directa")
-    
-    # Codificar el contenido HTML para descarga directa en navegador
     b64_html = base64.b64encode(html_content.encode('utf-8')).decode("utf-8")
-    href = f'<a href="data:text/html;base64,{b64_html}" download="Reporte_Ejecutivo_{datetime.now().strftime("%Y%m%d")}.html" style="text-decoration: none;"><button style="background-color: #1E3A8A; color: white; padding: 10px 20px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 16px;">📥 Descargar Reporte Ejecutivo</button></a>'
+    href = f'<a href="data:text/html;base64,{b64_html}" download="Reporte_Ejecutivo_{datetime.now().strftime("%Y%m%d")}.html" style="text-decoration: none;"><button style="background-color: #1E3A8A; color: white; padding: 12px 24px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 15px;">📥 Descargar Reporte Ejecutivo</button></a>'
     
     st.markdown(href, unsafe_allow_html=True)
-    st.info("💡 El archivo se descargará en formato web interactivo con diseño listo para impresión o conversión directa a PDF desde tu equipo.")
