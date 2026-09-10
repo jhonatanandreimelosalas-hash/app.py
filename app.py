@@ -664,6 +664,7 @@ elif menu == "8. Reporte Final":
     
     if st.button("📊 Generar Excel Profesional"):
         import openpyxl
+        import pandas as pd
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
         from openpyxl.utils import get_column_letter
 
@@ -735,13 +736,34 @@ elif menu == "8. Reporte Final":
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
-        # 1. Hoja de Ingresos
-        ws_ing = wb.create_sheet(title="Ingresos")
-        estilizar_hoja(ws_ing, "REPORTE DE INGRESOS", st.session_state.ingresos_df)
+        # --- CÁLCULO DEL BALANCE GENERAL ---
+        df_ing = st.session_state.ingresos_df
+        df_gas = st.session_state.gastos_df
+        
+        # Extraer sumatorias (asegurando que sean 0 si la tabla está vacía)
+        total_ingresos = float(df_ing['Valor'].sum()) if not df_ing.empty and 'Valor' in df_ing.columns else 0.0
+        total_gastos = float(df_gas['Valor'].sum()) if not df_gas.empty and 'Valor' in df_gas.columns else 0.0
+        balance_neto = total_ingresos - total_gastos
+        
+        estado = "Superávit (Ganancia)" if balance_neto >= 0 else "Déficit (Pérdida)"
 
-        # 2. Hoja de Gastos
+        # Crear un mini dataframe para la tabla del Balance
+        df_balance = pd.DataFrame({
+            "Concepto": ["Total Ingresos Recaudados", "Total Gastos Ejecutados", f"Balance Neto: {estado}"],
+            "Valor": [total_ingresos, total_gastos, balance_neto]
+        })
+
+        # 1. Hoja de Balance General (index=0 hace que sea la primera hoja)
+        ws_bal = wb.create_sheet(title="Balance General", index=0)
+        estilizar_hoja(ws_bal, "RESUMEN DE BALANCE GENERAL", df_balance)
+
+        # 2. Hoja de Ingresos
+        ws_ing = wb.create_sheet(title="Ingresos")
+        estilizar_hoja(ws_ing, "REPORTE DE INGRESOS", df_ing)
+
+        # 3. Hoja de Gastos
         ws_gas = wb.create_sheet(title="Gastos")
-        estilizar_hoja(ws_gas, "REPORTE DE GASTOS", st.session_state.gastos_df)
+        estilizar_hoja(ws_gas, "REPORTE DE GASTOS", df_gas)
 
         wb.save(EXCEL_FILE)
         st.success("✅ ¡Reporte Excel generado con éxito usando el nombre de tu cuenta!")
