@@ -245,18 +245,19 @@ GOOGLE_OAUTH_DISPONIBLE = "google_oauth" in st.secrets
 def construir_url_login_google():
     if not GOOGLE_OAUTH_DISPONIBLE:
         return None
+    from urllib.parse import urlencode
+
     client_id = st.secrets["google_oauth"]["client_id"]
     redirect_uri = st.secrets["google_oauth"]["redirect_uri"]
-    scope = "openid email profile"
-    return (
-        "https://accounts.google.com/o/oauth2/v2/auth"
-        f"?client_id={client_id}"
-        f"&redirect_uri={redirect_uri}"
-        "&response_type=code"
-        f"&scope={scope}"
-        "&access_type=online"
-        "&prompt=select_account"
-    )
+    params = {
+        "client_id": client_id,
+        "redirect_uri": redirect_uri,
+        "response_type": "code",
+        "scope": "openid email profile",
+        "access_type": "online",
+        "prompt": "select_account",
+    }
+    return "https://accounts.google.com/o/oauth2/v2/auth?" + urlencode(params)
 
 
 def procesar_callback_google():
