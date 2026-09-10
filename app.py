@@ -546,7 +546,6 @@ elif menu == "6. Anexo de Recibos & QR":
         )
 
 elif menu == "7. Gestión de Archivos":
-    elif menu == "7. Gestión de Archivos":
     st.markdown('<p class="main-header">📁 Repositorio de Documentos</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Registra y administra los comprobantes y documentos del proyecto en la base de datos.</p>', unsafe_allow_html=True)
     st.markdown("---")
