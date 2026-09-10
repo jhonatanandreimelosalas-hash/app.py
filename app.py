@@ -139,29 +139,121 @@ if not st.session_state.logged_in:
     
     tab1, tab2, tab3 = st.tabs(["Iniciar Sesión", "Crear Cuenta", "Olvidé mi Contraseña"])
     
-    with tab1:
-        with st.form("login_form"):
-            email_login = st.text_input("Correo Electrónico")
-            pass_login = st.text_input("Contraseña", type="password")
-            submit_login = st.form_submit_button("Entrar al Sistema")
-            
-            if submit_login and db:
-                user_ref = db.collection('usuarios').document(email_login.lower())
-                user_doc = user_ref.get()
-                
-                if user_doc.exists:
-                    user_data = user_doc.to_dict()
-                    if verify_password(pass_login, user_data['password']):
-                        st.session_state.logged_in = True
-                        st.session_state.user_data = user_data
-                        cargar_datos_nube()
-                        st.success("¡Bienvenido/a!")
-                        st.rerun()
-                    else:
-                        st.error("Contraseña incorrecta.")
-                else:
-                    st.error("No existe una cuenta con este correo.")
+   with tab1:
+  st.markdown("### Acceso Institucional con Google")
+  st.write(
+      "Usa tu cuenta autorizada para acceder de forma segura sin contraseñas."
+  )
 
+  auth_html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <script type="module">
+            import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+            import { getAuth, GoogleAuthProvider, signInWithPopup } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js";
+
+            const firebaseConfig = {
+                apiKey: "TU_API_KEY",
+                authDomain: "proyecto-app-ffdb5.firebaseapp.com",
+                projectId: "proyecto-app-ffdb5",
+                storageBucket: "proyecto-app-ffdb5.appspot.com",
+                messagingSenderId: "TU_MESSAGING_SENDER_ID",
+                appId: "TU_APP_ID"
+            };
+
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const provider = new GoogleAuthProvider();
+
+            window.loginWithGoogle = function() {
+                signInWithPopup(auth, provider)
+                    .then((result) => {
+                        const user = result.user;
+                        window.parent.postMessage({
+                            type: 'streamlit:setComponentValue',
+                            value: user.email
+                        }, '*');
+                    })
+                    .catch((error) => {
+                        console.error("Error en el login:", error);
+                    });
+            };
+        </script>
+    </head>
+    <body>
+        <button onclick="loginWithGoogle()" style="
+            background-color: #4285F4;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            font-size: 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-family: sans-serif;
+            font-weight: 600;
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        ">
+            Acceder con Google
+        </button>
+    </body>
+    </html>
+    """
+
+  resultado_auth = html(auth_html, height=60)
+
+  if resultado_auth:
+    email_ingresado = resultado_auth.lower()
+    user_ref = db.collection("usuarios").document(email_ingresado)
+    user_doc = user_ref.get()
+
+    if user_doc.exists:
+      st.session_state.logged_in = True
+      st.session_state.user_data = user_doc.to_dict()
+      cargar_datos_nube()
+      st.success("¡Bienvenido/a!")
+      st.rerun()
+    else:
+      # Registro automático del usuario de Google si no existe en Firestore
+      nuevo_usuario = {
+          "institucion": email_ingresado.split("@")[0].capitalize(),
+          "email": email_ingresado,
+          "password": "GOOGLE_AUTH",
+          "fecha_creacion": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+      }
+      db.collection("usuarios").document(email_ingresado).set(nuevo_usuario)
+      st.session_state.logged_in = True
+      st.session_state.user_data = nuevo_usuario
+      cargar_datos_nube()
+      st.success("¡Cuenta registrada e iniciada con Google!")
+      st.rerun()
+
+  st.markdown("---")
+  with st.expander("O usar contraseña tradicional"):
+    with st.form("login_form_tradicional"):
+      email_login = st.text_input("Correo Electrónico")
+      pass_login = st.text_input("Contraseña", type="password")
+      submit_login = st.form_submit_button("Entrar con Contraseña")
+
+      if submit_login and db:
+        user_ref = db.collection("usuarios").document(email_login.lower())
+        user_doc = user_ref.get()
+        if user_doc.exists:
+          user_data = user_doc.to_dict()
+          if verify_password(pass_login, user_data["password"]):
+            st.session_state.logged_in = True
+            st.session_state.user_data = user_data
+            cargar_datos_nube()
+            st.success("¡Bienvenido/a!")
+            st.rerun()
+          else:
+            st.error("Contraseña incorrecta.")
+        else:
+          st.error("No existe una cuenta con este correo.")
     with tab2:
         with st.form("register_form"):
             inst_name = st.text_input("Nombre de la Institución / Persona")
