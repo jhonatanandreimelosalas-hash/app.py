@@ -319,7 +319,7 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "6. Anexo de Recibos & QR", 
     "7. Gestión de Archivos",
     "8. Reporte Final",
-    "9. Reporte Ejecutivo PDF",
+    "9. Auditoría del Sistema",
 ])
 
 # --- APARTADO DE IA EN EL BORDE ---
@@ -754,97 +754,35 @@ elif menu == "8. Reporte Final":
                 file_name="Reporte_Financiero.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
-elif menu == "9. Reporte Ejecutivo PDF":
-    st.markdown('<p class="main-header">🖨️ Generador de Reporte Ejecutivo PDF</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Genera y descarga instantáneamente el informe formal en PDF.</p>', unsafe_allow_html=True)
+elif menu == "9. Auditoría del Sistema":
+    st.markdown('<p class="main-header">🔐 Auditoría y Registro de Actividad (Logs)</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Historial de control y seguridad institucional.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    import base64
+    st.info("ℹ️ Este registro muestra las acciones ejecutadas en la plataforma vinculadas al usuario activo.")
     
-    inst_name = st.session_state.user_data.get('institucion', 'Institución Financiera')
-    tot_ing = pd.to_numeric(st.session_state.ingresos_df["Valor"], errors='coerce').sum() if not st.session_state.ingresos_df.empty else 0.0
-    tot_gas = pd.to_numeric(st.session_state.gastos_df["Valor"], errors='coerce').sum() if not st.session_state.gastos_df.empty else 0.0
-    saldo = tot_ing - tot_gas
-    fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M')
-    
-    # HTML completo y estilizado para el reporte
-    html_content = f"""
-    <!DOCTYPE html>
-    <html>
-    <head>
-    <meta charset="utf-8">
-    <style>
-        body {{ font-family: Arial, sans-serif; padding: 20px; color: #333; }}
-        .container {{ border: 2px solid #1E3A8A; border-radius: 10px; padding: 30px; background-color: #FFFFFF; }}
-        h2 {{ color: #1E3A8A; text-align: center; margin-bottom: 5px; }}
-        .subtitle {{ text-align: center; color: #64748B; font-weight: bold; margin-top: 0; }}
-        hr {{ border: 1px solid #E2E8F0; margin: 20px 0; }}
-        table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
-        th {{ background-color: #1E3A8A; color: white; padding: 10px; text-align: left; border: 1px solid #CBD5E1; }}
-        td {{ padding: 8px; border: 1px solid #CBD5E1; }}
-        .text-right {{ text-align: right; }}
-        .footer {{ display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }}
-        .sign-box {{ width: 45%; border-top: 1px solid #333; padding-top: 5px; display: inline-block; }}
-    </style>
-    </head>
-    <body>
-        <div class="container">
-            <h2>INFORME FINANCIERO EJECUTIVO</h2>
-            <p class="subtitle">{inst_name}</p>
-            <hr>
-            <p><b>Fecha de emisión:</b> {fecha_hoy}</p>
-            <p><b>Estado del Balance:</b> {'SUPERÁVIT' if saldo >= 0 else 'DÉFICIT'}</p>
+    # Crear colección de auditoría en vivo en Firestore si no existe, o leerla
+    if db:
+        try:
+            logs_ref = db.collection("auditoria").stream()
+            logs_lista = [l.to_dict() for l in logs_ref]
             
-            <table>
-                <tr>
-                    <th>Concepto / Indicador</th>
-                    <th class="text-right">Monto Total (COP)</th>
-                </tr>
-                <tr>
-                    <td>Total Ingresos Registrados</td>
-                    <td class="text-right" style="color: #059669; font-weight: bold;">${tot_ing:,.0f}</td>
-                </tr>
-                <tr>
-                    <td>Total Egresos / Gastos</td>
-                    <td class="text-right" style="color: #DC2626; font-weight: bold;">${tot_gas:,.0f}</td>
-                </tr>
-                <tr style="background-color: #F8FAFC;">
-                    <td><b>BALANCE NETO FINAL</b></td>
-                    <td class="text-right" style="font-weight: bold; font-size: 1.1em;">${saldo:,.0f}</td>
-                </tr>
-            </table>
-            
-            <br><br>
-            <div class="footer">
-                <div class="sign-box">
-                    <p style="margin: 0; font-weight: bold;">Elaborado por</p>
-                    <p style="margin: 0; font-size: 0.9em; color: #64748B;">Saray Medina / Equipo de Proyecto</p>
-                </div>
-                <div class="sign-box" style="float: right;">
-                    <p style="margin: 0; font-weight: bold;">Supervisado / Aprobado</p>
-                    <p style="margin: 0; font-size: 0.9em; color: #64748B;">{inst_name}</p>
-                </div>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    
-    # Mostrar la vista previa visual en la aplicación
-    st.markdown("### 👁️ Vista Previa del Informe")
-    st.components.v1.html(html_content, height=500, scrolling=True)
-    
-    st.markdown("---")
-    
-    # Generador de descarga directa usando WeasyPrint o truco HTML de descarga
-    # Como Streamlit Cloud a veces limita librerías binarias pesadas de PDF, 
-    # creamos un botón interactivo que exporta el reporte limpio.
-    st.markdown("### 📥 Descarga Directa")
-    
-    # Codificar el contenido HTML para descarga directa en navegador
-    b64_html = base64.b64encode(html_content.encode('utf-8')).decode("utf-8")
-    href = f'<a href="data:text/html;base64,{b64_html}" download="Reporte_Ejecutivo_{datetime.now().strftime("%Y%m%d")}.html" style="text-decoration: none;"><button style="background-color: #1E3A8A; color: white; padding: 10px 20px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 16px;">📥 Descargar Reporte Ejecutivo</button></a>'
-    
-    st.markdown(href, unsafe_allow_html=True)
-    st.info("💡 El archivo se descargará en formato web interactivo con diseño listo para impresión o conversión directa a PDF desde tu equipo.")
+            if logs_lista:
+                df_logs = pd.DataFrame(logs_lista)
+                st.dataframe(df_logs, use_container_width=True, hide_index=True)
+            else:
+                # Si está vacío, guardamos el primer log de sesión actual
+                usuario_actual = st.session_state.user_data.get('institucion', 'Usuario')
+                log_inicial = {
+                    "Fecha": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                    "Usuario": usuario_actual,
+                    "Acción": "Acceso verificado al portal financiero",
+                    "Módulo": "Autenticación"
+                }
+                db.collection("auditoria").document(f"LOG-{datetime.now().strftime('%Y%m%d%H%M%S')}").set(log_inicial)
+                st.success("Se ha inicializado el registro de auditoría con tu sesión actual.")
+                st.rerun()
+        except Exception as e:
+            st.warning(f"No se pudieron cargar los registros de auditoría: {e}")
+    else:
+        st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
