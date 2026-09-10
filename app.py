@@ -497,8 +497,10 @@ elif menu == "4. Balance Financiero":
 elif menu == "5. Dashboard y Gráficos":
     st.markdown('<p class="main-header">📊 Dashboard Interactivo</p>', unsafe_allow_html=True)
     st.markdown("---")
-    tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
-    tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+    
+    # Conversión segura a numérico para evitar errores
+    tot_ing = pd.to_numeric(st.session_state.ingresos_df["Valor"], errors='coerce').sum() if not st.session_state.ingresos_df.empty else 0.0
+    tot_gas = pd.to_numeric(st.session_state.gastos_df["Valor"], errors='coerce').sum() if not st.session_state.gastos_df.empty else 0.0
     
     col1, col2 = st.columns(2)
     with col1:
@@ -510,30 +512,40 @@ elif menu == "5. Dashboard y Gráficos":
     with col2:
         st.markdown("#### Gastos por Categoría")
         if not st.session_state.gastos_df.empty:
-            df_cat = st.session_state.gastos_df.groupby("Categoría")["Valor"].sum().reset_index()
+            df_gastos_temp = st.session_state.gastos_df.copy()
+            df_gastos_temp["Valor"] = pd.to_numeric(df_gastos_temp["Valor"], errors='coerce').fillna(0)
+            df_cat = df_gastos_temp.groupby("Categoría")["Valor"].sum().reset_index()
             fig_pie = px.pie(df_cat, names="Categoría", values="Valor", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
             st.plotly_chart(fig_pie, use_container_width=True)
+        else:
+            st.info("No hay gastos registrados aún.")
   
-st.markdown("#### 📈 Evolución Temporal de Movimientos")
-        df_all = []
-        if not st.session_state.ingresos_df.empty:
-            df_i = st.session_state.ingresos_df[["Fecha", "Valor"]].copy()
-            df_i["Tipo"] = "Ingreso"
-            df_all.append(df_i)
-        if not st.session_state.gastos_df.empty:
-            df_g = st.session_state.gastos_df[["Fecha", "Valor"]].copy()
-            df_g["Tipo"] = "Gasto"
-            df_all.append(df_g)
-            
-        if df_all:
-            df_timeline = pd.concat(df_all, ignore_index=True)
-            df_timeline["Fecha"] = pd.to_datetime(df_timeline["Fecha"])
-            df_timeline = df_timeline.sort_values("Fecha")
+    st.markdown("#### 📈 Evolución Temporal de Movimientos")
+    df_all = []
+    if not st.session_state.ingresos_df.empty:
+        df_i = st.session_state.ingresos_df[["Fecha", "Valor"]].copy()
+        df_i["Valor"] = pd.to_numeric(df_i["Valor"], errors='coerce').fillna(0)
+        df_i["Tipo"] = "Ingreso"
+        df_all.append(df_i)
+        
+    if not st.session_state.gastos_df.empty:
+        df_g = st.session_state.gastos_df[["Fecha", "Valor"]].copy()
+        df_g["Valor"] = pd.to_numeric(df_g["Valor"], errors='coerce').fillna(0)
+        df_g["Tipo"] = "Gasto"
+        df_all.append(df_g)
+        
+    if df_all:
+        df_timeline = pd.concat(df_all, ignore_index=True)
+        df_timeline["Fecha"] = pd.to_datetime(df_timeline["Fecha"], errors='coerce')
+        df_timeline = df_timeline.dropna(subset=["Fecha"]).sort_values("Fecha")
+        
+        if not df_timeline.empty:
             fig_line = px.line(df_timeline, x="Fecha", y="Valor", color="Tipo", markers=True, color_discrete_map={"Ingreso": "#10B981", "Gasto": "#EF4444"})
             st.plotly_chart(fig_line, use_container_width=True)
         else:
-            st.info("Registra ingresos o gastos para ver la línea de tiempo.")
-
+            st.info("Las fechas registradas no tienen un formato válido para la línea de tiempo.")
+    else:
+        st.info("Registra ingresos o gastos para ver la línea de tiempo.")
 elif menu == "6. Anexo de Recibos & QR":
     st.markdown('<p class="main-header">🧾 Generador de Comprobante General</p>', unsafe_allow_html=True)
     st.markdown("---")
