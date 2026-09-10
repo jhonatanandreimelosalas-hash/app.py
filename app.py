@@ -754,6 +754,3 @@ elif menu == "8. Reporte Final":
                 file_name="Reporte_Financiero.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-
-elif menu == "9. Indicadores y Dashboard":
-    
