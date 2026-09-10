@@ -39,15 +39,15 @@ FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com'
 
 if not firebase_admin._apps:
     try:
-        # Intenta leer credenciales desde los Secrets de Streamlit Cloud
         if "firebase" in st.secrets:
             cred_dict = dict(st.secrets["firebase"])
+            # Reemplaza caracteres escapados por saltos de línea reales
+            cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
             cred = credentials.Certificate(cred_dict)
-        # Si no detecta Secrets, busca el archivo local
         elif os.path.exists('firebase_key.json'):
             cred = credentials.Certificate('firebase_key.json')
         else:
-            st.error("⚠️ No se encontraron credenciales de Firebase en Secrets ni en firebase_key.json.")
+            st.error("⚠️ No se encontraron credenciales de Firebase.")
             st.stop()
             
         firebase_admin.initialize_app(cred, {
@@ -58,7 +58,6 @@ if not firebase_admin._apps:
 
 db = firestore.client() if firebase_admin._apps else None
 bucket = storage.bucket() if firebase_admin._apps else None
-
 # --- DATOS GLOBALES ---
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 INTEGRANTES_LISTA = [
