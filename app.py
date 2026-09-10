@@ -370,6 +370,7 @@ if st.session_state.ia_abierta:
                     st.error(f"Error con la IA: {e}")
 
 # --- RUTAS DE LAS PÁGINAS ---
+import datetime # Asegúrate de que esto esté arriba
 
 if menu == "1. Inicio":
     st.markdown('<p class="main-header">🏛️ Proyecto de Control y Gestión Financiera</p>', unsafe_allow_html=True)
@@ -396,7 +397,8 @@ elif menu == "2. Registro de Ingresos":
         with st.form("form_nuevo_ingreso"):
             c1, c2 = st.columns(2)
             with c1:
-                f_ing = st.date_input("Fecha", value=datetime.now())
+                # CORRECCIÓN AQUÍ
+                f_ing = st.date_input("Fecha", value=datetime.date.today())
                 con_ing = st.text_input("Concepto")
             with c2:
                 resp_ing = st.selectbox("Responsable", INTEGRANTES_LISTA)
@@ -407,7 +409,8 @@ elif menu == "2. Registro de Ingresos":
                 if con_ing.strip() == "":
                     st.error("⚠️ El concepto no puede estar vacío.")
                 else:
-                    reg_id = f"ING-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    # CORRECCIÓN AQUÍ
+                    reg_id = f"ING-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                     nuevo_reg = {
                         "ID": reg_id,
                         "Fecha": f_ing.strftime("%Y-%m-%d"),
@@ -451,7 +454,8 @@ elif menu == "3. Registro de Gastos":
         with st.form("form_nuevo_gasto"):
             c1, c2 = st.columns(2)
             with c1:
-                f_gas = st.date_input("Fecha Gasto", value=datetime.now())
+                # CORRECCIÓN AQUÍ
+                f_gas = st.date_input("Fecha Gasto", value=datetime.date.today())
                 con_gas = st.text_input("Concepto")
                 cat_gas = st.selectbox("Categoría", ["Logística", "Publicidad", "Alimentación", "Varios"])
             with c2:
@@ -462,7 +466,8 @@ elif menu == "3. Registro de Gastos":
                 if con_gas.strip() == "":
                     st.error("⚠️ El concepto no puede estar vacío.")
                 else:
-                    reg_id = f"GAS-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    # CORRECCIÓN AQUÍ
+                    reg_id = f"GAS-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                     nuevo_reg = {
                         "ID": reg_id,
                         "Fecha": f_gas.strftime("%Y-%m-%d"),
@@ -491,7 +496,6 @@ elif menu == "3. Registro de Gastos":
             st.session_state.gastos_df = st.session_state.gastos_df.drop(idx).reset_index(drop=True)
             st.success("Gasto eliminado.")
             st.rerun()
-
 elif menu == "4. Balance Financiero":
     st.markdown('<p class="main-header">⚖️ Balance Financiero General</p>', unsafe_allow_html=True)
     st.markdown("---")
