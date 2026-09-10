@@ -754,6 +754,7 @@ elif menu == "8. Reporte Final":
                 file_name="Reporte_Financiero.xlsx", 
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
 elif menu == "10. Reporte Ejecutivo PDF":
     st.markdown('<p class="main-header">🖨️ Generador de Reporte Ejecutivo PDF</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Genera y descarga instantáneamente el informe formal en PDF.</p>', unsafe_allow_html=True)
