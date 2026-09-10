@@ -755,10 +755,12 @@ elif menu == "8. Reporte Final":
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-elif menu == "9. Reporte Ejecutivo PDF":
+elif menu == "10. Reporte Ejecutivo PDF":
     st.markdown('<p class="main-header">🖨️ Generador de Reporte Ejecutivo PDF</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Vista previa y descarga del informe institucional.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Genera y descarga instantáneamente el informe formal en PDF.</p>', unsafe_allow_html=True)
     st.markdown("---")
+    
+    import base64
     
     inst_name = st.session_state.user_data.get('institucion', 'Institución Financiera')
     tot_ing = pd.to_numeric(st.session_state.ingresos_df["Valor"], errors='coerce').sum() if not st.session_state.ingresos_df.empty else 0.0
@@ -766,46 +768,24 @@ elif menu == "9. Reporte Ejecutivo PDF":
     saldo = tot_ing - tot_gas
     fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M')
     
-    # Vista previa visual usando componentes nativos (100% seguros)
-    st.markdown(f"### 📋 Vista Previa del Informe — {inst_name}")
-    st.info(f"📅 **Fecha de emisión:** {fecha_hoy}  |  ⚖️ **Estado:** {'SUPERÁVIT' if saldo >= 0 else 'DÉFICIT'}")
-    
-    # Tabla resumen ejecutiva
-    df_resumen = pd.DataFrame({
-        "Concepto / Indicador": ["Total Ingresos Registrados", "Total Egresos / Gastos", "BALANCE NETO FINAL"],
-        "Monto (COP)": [f"${tot_ing:,.0f}", f"${tot_gas:,.0f}", f"${saldo:,.0f}"]
-    })
-    st.dataframe(df_resumen, use_container_width=True, hide_index=True)
-    
-    # Firmas institucionales en texto formateado
-    col_f1, col_f2 = st.columns(2)
-    with col_f1:
-        st.markdown("---")
-        st.markdown("**Elaborado por:**\nSaray Medina / Equipo de Proyecto")
-    with col_f2:
-        st.markdown("---")
-        st.markdown(f"**Aprobado por:**\n{inst_name}")
-        
-    st.markdown("---")
-    st.markdown("### 📥 Descargar Reporte")
-    
-    # Generar el contenido del archivo en formato HTML limpio y profesional
+    # HTML completo y estilizado para el reporte
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
     <meta charset="utf-8">
-    <title>Informe Financiero - {inst_name}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; padding: 30px; color: #333; }}
+        body {{ font-family: Arial, sans-serif; padding: 20px; color: #333; }}
         .container {{ border: 2px solid #1E3A8A; border-radius: 10px; padding: 30px; background-color: #FFFFFF; }}
         h2 {{ color: #1E3A8A; text-align: center; margin-bottom: 5px; }}
         .subtitle {{ text-align: center; color: #64748B; font-weight: bold; margin-top: 0; }}
         hr {{ border: 1px solid #E2E8F0; margin: 20px 0; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
         th {{ background-color: #1E3A8A; color: white; padding: 10px; text-align: left; border: 1px solid #CBD5E1; }}
-        td {{ padding: 10px; border: 1px solid #CBD5E1; }}
+        td {{ padding: 8px; border: 1px solid #CBD5E1; }}
         .text-right {{ text-align: right; }}
+        .footer {{ display: flex; justify-content: space-between; margin-top: 60px; text-align: center; }}
+        .sign-box {{ width: 45%; border-top: 1px solid #333; padding-top: 5px; display: inline-block; }}
     </style>
     </head>
     <body>
@@ -835,26 +815,36 @@ elif menu == "9. Reporte Ejecutivo PDF":
                 </tr>
             </table>
             
-            <br><br><br>
-            <div style="width: 100%; margin-top: 40px;">
-                <div style="float: left; width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 5px;">
-                    <b>Elaborado por</b><br><span style="color: #64748B;">Saray Medina</span>
+            <br><br>
+            <div class="footer">
+                <div class="sign-box">
+                    <p style="margin: 0; font-weight: bold;">Elaborado por</p>
+                    <p style="margin: 0; font-size: 0.9em; color: #64748B;">Saray Medina / Equipo de Proyecto</p>
                 </div>
-                <div style="float: right; width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 5px;">
-                    <b>Supervisado / Aprobado</b><br><span style="color: #64748B;">{inst_name}</span>
+                <div class="sign-box" style="float: right;">
+                    <p style="margin: 0; font-weight: bold;">Supervisado / Aprobado</p>
+                    <p style="margin: 0; font-size: 0.9em; color: #64748B;">{inst_name}</p>
                 </div>
-                <div style="clear: both;"></div>
             </div>
         </div>
     </body>
     </html>
     """
     
-    # Usar el botón de descarga nativo de Streamlit (¡Cero riesgos de pantalla en blanco!)
-    st.download_button(
-        label="📥 Descargar Reporte Ejecutivo Oficial",
-        data=html_content,
-        file_name=f"Reporte_Ejecutivo_{datetime.now().strftime('%Y%m%d')}.html",
-        mime="text/html",
-        use_container_width=True
-    )
+    # Mostrar la vista previa visual en la aplicación
+    st.markdown("### 👁️ Vista Previa del Informe")
+    st.components.v1.html(html_content, height=500, scrolling=True)
+    
+    st.markdown("---")
+    
+    # Generador de descarga directa usando WeasyPrint o truco HTML de descarga
+    # Como Streamlit Cloud a veces limita librerías binarias pesadas de PDF, 
+    # creamos un botón interactivo que exporta el reporte limpio.
+    st.markdown("### 📥 Descarga Directa")
+    
+    # Codificar el contenido HTML para descarga directa en navegador
+    b64_html = base64.b64encode(html_content.encode('utf-8')).decode("utf-8")
+    href = f'<a href="data:text/html;base64,{b64_html}" download="Reporte_Ejecutivo_{datetime.now().strftime("%Y%m%d")}.html" style="text-decoration: none;"><button style="background-color: #1E3A8A; color: white; padding: 10px 20px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; font-size: 16px;">📥 Descargar Reporte Ejecutivo</button></a>'
+    
+    st.markdown(href, unsafe_allow_html=True)
+    st.info("💡 El archivo se descargará en formato web interactivo con diseño listo para impresión o conversión directa a PDF desde tu equipo.")
