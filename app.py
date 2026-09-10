@@ -546,64 +546,61 @@ elif menu == "6. Anexo de Recibos & QR":
         )
 
 elif menu == "7. Gestión de Archivos":
-    st.markdown('<p class="main-header">📁 Repositorio de Documentos e Imágenes</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Sube tus recibos, facturas (PDF o Imagen) para guardarlos en la nube de forma permanente.</p>', unsafe_allow_html=True)
+    elif menu == "7. Gestión de Archivos":
+    st.markdown('<p class="main-header">📁 Repositorio de Documentos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Registra y administra los comprobantes y documentos del proyecto en la base de datos.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    archivo_subido = st.file_uploader("Sube tu archivo (PDF, PNG, JPG)", type=["png", "jpg", "jpeg", "pdf"])
-    
-    if archivo_subido and db and bucket:
-        if st.button("⬆️ Guardar Archivo en la Nube"):
-            with st.spinner("Subiendo archivo..."):
-                nombre_archivo = f"{datetime.now().strftime('%Y%m%d%H%M%S')}_{archivo_subido.name}"
-                blob = bucket.blob(f"documentos/{nombre_archivo}")
-                
-                file_bytes = archivo_subido.getvalue()
-                blob.upload_from_string(file_bytes, content_type=archivo_subido.type)
-                blob.make_public()
-                
-                url_miniatura = blob.public_url
-                es_pdf = archivo_subido.type == "application/pdf"
-                
-                if es_pdf:
-                    miniatura_bytes = generar_miniatura_pdf(file_bytes)
-                    if miniatura_bytes:
-                        blob_min = bucket.blob(f"miniaturas/{nombre_archivo}.jpg")
-                        blob_min.upload_from_string(miniatura_bytes, content_type="image/jpeg")
-                        blob_min.make_public()
-                        url_miniatura = blob_min.public_url
-                
+    with st.form("form_subir_archivo"):
+        archivo_subido = st.file_uploader("Sube tu archivo (PDF, PNG, JPG)", type=["png", "jpg", "jpeg", "pdf"])
+        descripcion_archivo = st.text_input("Descripción o Nota del Documento")
+        submit_archivo = st.form_submit_button("💾 Registrar Archivo en el Sistema")
+        
+        if submit_archivo and db:
+            if archivo_subido is not None:
+                nombre_id = f"ARCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 doc_data = {
+                    "ID": nombre_id,
                     "nombre": archivo_subido.name,
-                    "url_archivo": blob.public_url,
-                    "url_miniatura": url_miniatura,
-                    "tipo": "PDF" if es_pdf else "Imagen",
+                    "tipo": archivo_subido.type,
+                    "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
                 }
-                db.collection("archivos").document(nombre_archivo).set(doc_data)
-                st.success("✅ Archivo subido y guardado exitosamente.")
-        
-    st.markdown("### 🖼️ Galería de Archivos Guardados")
-    if db:
-        archivos_ref = db.collection("archivos").stream()
-        archivos_lista = [a.to_dict() for a in archivos_ref]
-        
-        if archivos_lista:
-            columnas = st.columns(4)
-            for i, arch in enumerate(archivos_lista):
-                with columnas[i % 4]:
-                    st.markdown('<div class="file-card">', unsafe_allow_html=True)
-                    st.image(arch['url_miniatura'], use_container_width=True)
-                    st.markdown(f"**{arch['nombre'][:15]}...**")
-                    st.caption(f"{arch['tipo']} | {arch['fecha']}")
-                    st.markdown(f"[📥 Descargar original]({arch['url_archivo']})")
-                    st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.info("Aún no hay archivos subidos en la nube.")
-    else:
-        st.warning("Conecta Firebase para ver la galería de archivos.")
+                db.collection("archivos").document(nombre_id).set(doc_data)
+                st.success("✅ ¡Archivo registrado y guardado exitosamente en la base de datos!")
+                st.rerun()
+            else:
+                st.error("⚠️ Por favor selecciona un archivo antes de guardar.")
 
+    st.markdown("### 📋 Lista de Archivos y Comprobantes Registrados")
+    if db:
+        try:
+            archivos_ref = db.collection("archivos").stream()
+            archivos_lista = [a.to_dict() for a in archivos_ref]
+            
+            if archivos_lista:
+                df_archivos = pd.DataFrame(archivos_lista)
+                # Reordenar columnas para que se vea mejor
+                cols_orden = [col for col in ["fecha", "nombre", "tipo", "descripcion", "subido_por"] if col in df_archivos.columns]
+                st.dataframe(df_archivos[cols_orden], use_container_width=True, hide_index=True)
+                
+                st.markdown("### 🗑️ Eliminar Registro de Archivo")
+                opciones_arch = [f"{row['nombre']} ({row['fecha']})" for row in archivos_lista]
+                sel_arch = st.selectbox("Selecciona archivo a eliminar:", opciones_arch)
+                
+                if st.button("❌ Eliminar Registro"):
+                    idx = opciones_arch.index(sel_arch)
+                    doc_id_eliminar = archivos_lista[idx]['ID']
+                    db.collection("archivos").document(doc_id_eliminar).delete()
+                    st.success("Registro eliminado correctamente.")
+                    st.rerun()
+            else:
+                st.info("Aún no hay archivos registrados en el sistema.")
+        except Exception as e:
+            st.error(f"Error al cargar los archivos: {e}")
+    else:
+        st.warning("Conecta Firebase para ver la lista de archivos.")
 elif menu == "8. Reporte Final":
     st.markdown('<p class="main-header">📑 Descarga de Excel</p>', unsafe_allow_html=True)
     st.markdown("---")
