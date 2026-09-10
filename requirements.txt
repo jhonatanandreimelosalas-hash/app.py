@@ -1,10 +1,10 @@
-pip install streamlit
-pip install pandas
-pip install openpyxl
-pip install qrcode
-pip install pillow
-pip install plotly
-pip install google-genai
-pip install firebase-admin
-pip install bcrypt
-pip install pymupdf
+streamlit
+pandas
+openpyxl
+qrcode
+pillow
+plotly
+google-genai
+firebase-admin
+bcrypt
+pymupdf
