@@ -300,18 +300,26 @@ if not st.session_state.logged_in:
 
 import datetime
 
+import datetime
+
+# --- INICIALIZAR ESTADO DE OMITIR ALERTA ---
+# Esto asegura que la página recuerde si le diste a "Omitir" para no molestarte más
+if "omitir_alerta_presupuesto" not in st.session_state:
+    st.session_state.omitir_alerta_presupuesto = False
+
 # --- MENÚ LATERAL ---
 st.sidebar.markdown(f"👋 **Hola, {st.session_state.user_data['institucion']}**")
 if st.sidebar.button("🚪 Cerrar Sesión"):
     st.session_state.logged_in = False
     st.session_state.user_data = None
+    # Reiniciamos la alerta para que vuelva a avisar en el próximo inicio de sesión
+    st.session_state.omitir_alerta_presupuesto = False 
     st.rerun()
 
 st.sidebar.markdown("---")
 st.sidebar.markdown("⚙️ **Configuración de Presupuesto**")
-presupuesto_tope = st.sidebar.number_input("Presupuesto / Límite de Gastos ($)", min_value=0.0, value=500000.0, step=50000.0)
 
-# --- NUEVO: Configuración de Fechas ---
+# 1. Obtener el tiempo exacto actual
 hoy = datetime.date.today()
 fin_estimado = hoy + datetime.timedelta(days=30) # Por defecto selecciona 30 días
 
@@ -320,6 +328,28 @@ periodo_presupuesto = st.sidebar.date_input(
     "📅 Período de Ejecución",
     value=(hoy, fin_estimado)
 )
+
+presupuesto_tope = st.sidebar.number_input("Presupuesto / Límite de Gastos ($)", min_value=0.0, value=500000.0, step=50000.0)
+
+# --- 2. LÓGICA DE TIEMPO FINALIZADO Y ALERTA ---
+# Comprobamos que el usuario haya seleccionado dos fechas (inicio y fin)
+if isinstance(periodo_presupuesto, tuple) and len(periodo_presupuesto) == 2:
+    fecha_fin = periodo_presupuesto[1]
+    
+    # Comparamos el tiempo exacto: ¿El día de hoy ya superó la fecha límite del presupuesto?
+    if hoy > fecha_fin:
+        # Si ya se acabó el tiempo, y NO le hemos dado al botón de omitir:
+        if not st.session_state.omitir_alerta_presupuesto:
+            # Creamos un aviso pequeño en el menú lateral
+            with st.sidebar.container():
+                st.warning("⚠️ **¡Tiempo finalizado!**\n\nEl período de tu presupuesto ha terminado. Por favor, asigna uno nuevo.")
+                if st.button("Omitir por ahora"):
+                    # Si oprime omitir, lo guardamos en la memoria y recargamos
+                    st.session_state.omitir_alerta_presupuesto = True
+                    st.rerun()
+    else:
+        # Si el presupuesto sigue vigente o se actualizó, nos aseguramos de quitar la alerta
+        st.session_state.omitir_alerta_presupuesto = False
 
 st.sidebar.markdown("---")
 menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
