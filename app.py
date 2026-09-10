@@ -513,7 +513,8 @@ elif menu == "5. Dashboard y Gráficos":
             df_cat = st.session_state.gastos_df.groupby("Categoría")["Valor"].sum().reset_index()
             fig_pie = px.pie(df_cat, names="Categoría", values="Valor", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
             st.plotly_chart(fig_pie, use_container_width=True)
-   st.markdown("#### 📈 Evolución Temporal de Movimientos")
+  
+st.markdown("#### 📈 Evolución Temporal de Movimientos")
         df_all = []
         if not st.session_state.ingresos_df.empty:
             df_i = st.session_state.ingresos_df[["Fecha", "Valor"]].copy()
