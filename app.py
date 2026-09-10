@@ -759,30 +759,38 @@ elif menu == "9. Auditoría del Sistema":
     st.markdown('<p class="sub-header">Historial de control y seguridad institucional.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    st.info("ℹ️ Este registro muestra las acciones ejecutadas en la plataforma vinculadas al usuario activo.")
+    # Campo de contraseña protegido
+    pwd_ingresada = st.text_input("🔑 Introduce la contraseña de acceso exclusivo:", type="password")
     
-    # Crear colección de auditoría en vivo en Firestore si no existe, o leerla
-    if db:
-        try:
-            logs_ref = db.collection("auditoria").stream()
-            logs_lista = [l.to_dict() for l in logs_ref]
+    if pwd_ingresada == "El amor que vale 123":
+        st.success("✅ Acceso autorizado al módulo de auditoría.")
+        st.markdown("---")
+        
+        if db:
+            try:
+                logs_ref = db.collection("auditoria").stream()
+                logs_lista = [l.to_dict() for l in logs_ref]
+                
+                if logs_lista:
+                    df_logs = pd.DataFrame(logs_lista)
+                    st.dataframe(df_logs, use_container_width=True, hide_index=True)
+                else:
+                    usuario_actual = st.session_state.user_data.get('institucion', 'Usuario')
+                    log_inicial = {
+                        "Fecha": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                        "Usuario": usuario_actual,
+                        "Acción": "Acceso verificado al portal financiero",
+                        "Módulo": "Autenticación"
+                    }
+                    db.collection("auditoria").document(f"LOG-{datetime.now().strftime('%Y%m%d%H%M%S')}").set(log_inicial)
+                    st.success("Se ha inicializado el registro de auditoría con tu sesión actual.")
+                    st.rerun()
+            except Exception as e:
+                st.warning(f"No se pudieron cargar los registros de auditoría: {e}")
+        else:
+            st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
             
-            if logs_lista:
-                df_logs = pd.DataFrame(logs_lista)
-                st.dataframe(df_logs, use_container_width=True, hide_index=True)
-            else:
-                # Si está vacío, guardamos el primer log de sesión actual
-                usuario_actual = st.session_state.user_data.get('institucion', 'Usuario')
-                log_inicial = {
-                    "Fecha": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                    "Usuario": usuario_actual,
-                    "Acción": "Acceso verificado al portal financiero",
-                    "Módulo": "Autenticación"
-                }
-                db.collection("auditoria").document(f"LOG-{datetime.now().strftime('%Y%m%d%H%M%S')}").set(log_inicial)
-                st.success("Se ha inicializado el registro de auditoría con tu sesión actual.")
-                st.rerun()
-        except Exception as e:
-            st.warning(f"No se pudieron cargar los registros de auditoría: {e}")
+    elif pwd_ingresada != "":
+        st.error("❌ Contraseña incorrecta. Acceso restringido.")
     else:
-        st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
+        st.info("🔒 Esta sección se encuentra protegida. Ingresa la contraseña asignada para visualizar los registros.")
