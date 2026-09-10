@@ -760,28 +760,51 @@ elif menu == "10. Reporte Ejecutivo PDF":
     st.markdown('<p class="sub-header">Vista previa y descarga del informe institucional.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    import base64
-    
     inst_name = st.session_state.user_data.get('institucion', 'Institución Financiera')
     tot_ing = pd.to_numeric(st.session_state.ingresos_df["Valor"], errors='coerce').sum() if not st.session_state.ingresos_df.empty else 0.0
     tot_gas = pd.to_numeric(st.session_state.gastos_df["Valor"], errors='coerce').sum() if not st.session_state.gastos_df.empty else 0.0
     saldo = tot_ing - tot_gas
     fecha_hoy = datetime.now().strftime('%Y-%m-%d %H:%M')
     
+    # Vista previa visual usando componentes nativos (100% seguros)
+    st.markdown(f"### 📋 Vista Previa del Informe — {inst_name}")
+    st.info(f"📅 **Fecha de emisión:** {fecha_hoy}  |  ⚖️ **Estado:** {'SUPERÁVIT' if saldo >= 0 else 'DÉFICIT'}")
+    
+    # Tabla resumen ejecutiva
+    df_resumen = pd.DataFrame({
+        "Concepto / Indicador": ["Total Ingresos Registrados", "Total Egresos / Gastos", "BALANCE NETO FINAL"],
+        "Monto (COP)": [f"${tot_ing:,.0f}", f"${tot_gas:,.0f}", f"${saldo:,.0f}"]
+    })
+    st.dataframe(df_resumen, use_container_width=True, hide_index=True)
+    
+    # Firmas institucionales en texto formateado
+    col_f1, col_f2 = st.columns(2)
+    with col_f1:
+        st.markdown("---")
+        st.markdown("**Elaborado por:**\nSaray Medina / Equipo de Proyecto")
+    with col_f2:
+        st.markdown("---")
+        st.markdown(f"**Aprobado por:**\n{inst_name}")
+        
+    st.markdown("---")
+    st.markdown("### 📥 Descargar Reporte")
+    
+    # Generar el contenido del archivo en formato HTML limpio y profesional
     html_content = f"""
     <!DOCTYPE html>
     <html>
     <head>
     <meta charset="utf-8">
+    <title>Informe Financiero - {inst_name}</title>
     <style>
-        body {{ font-family: Arial, sans-serif; padding: 20px; color: #333; }}
+        body {{ font-family: Arial, sans-serif; padding: 30px; color: #333; }}
         .container {{ border: 2px solid #1E3A8A; border-radius: 10px; padding: 30px; background-color: #FFFFFF; }}
         h2 {{ color: #1E3A8A; text-align: center; margin-bottom: 5px; }}
         .subtitle {{ text-align: center; color: #64748B; font-weight: bold; margin-top: 0; }}
         hr {{ border: 1px solid #E2E8F0; margin: 20px 0; }}
         table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
         th {{ background-color: #1E3A8A; color: white; padding: 10px; text-align: left; border: 1px solid #CBD5E1; }}
-        td {{ padding: 8px; border: 1px solid #CBD5E1; }}
+        td {{ padding: 10px; border: 1px solid #CBD5E1; }}
         .text-right {{ text-align: right; }}
     </style>
     </head>
@@ -812,13 +835,13 @@ elif menu == "10. Reporte Ejecutivo PDF":
                 </tr>
             </table>
             
-            <br><br>
-            <div style="margin-top: 50px;">
+            <br><br><br>
+            <div style="width: 100%; margin-top: 40px;">
                 <div style="float: left; width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 5px;">
-                    <b>Elaborado por</b><br><span style="color: #64748B; font-size: 0.9em;">Saray Medina</span>
+                    <b>Elaborado por</b><br><span style="color: #64748B;">Saray Medina</span>
                 </div>
                 <div style="float: right; width: 45%; border-top: 1px solid #333; text-align: center; padding-top: 5px;">
-                    <b>Supervisado / Aprobado</b><br><span style="color: #64748B; font-size: 0.9em;">{inst_name}</span>
+                    <b>Supervisado / Aprobado</b><br><span style="color: #64748B;">{inst_name}</span>
                 </div>
                 <div style="clear: both;"></div>
             </div>
@@ -827,13 +850,11 @@ elif menu == "10. Reporte Ejecutivo PDF":
     </html>
     """
     
-    st.markdown("### 👁️ Vista Previa del Informe")
-    st.components.v1.html(html_content, height=480, scrolling=True)
-    
-    st.markdown("---")
-    st.markdown("### 📥 Descarga del Reporte")
-    
-    b64_html = base64.b64encode(html_content.encode('utf-8')).decode("utf-8")
-    href = f'<a href="data:text/html;base64,{b64_html}" download="Reporte_Ejecutivo_{datetime.now().strftime("%Y%m%d")}.html" style="text-decoration: none;"><button style="background-color: #1E3A8A; color: white; padding: 12px 24px; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; font-size: 15px;">📥 Descargar Reporte Ejecutivo</button></a>'
-    
-    st.markdown(href, unsafe_allow_html=True)
+    # Usar el botón de descarga nativo de Streamlit (¡Cero riesgos de pantalla en blanco!)
+    st.download_button(
+        label="📥 Descargar Reporte Ejecutivo Oficial",
+        data=html_content,
+        file_name=f"Reporte_Ejecutivo_{datetime.now().strftime('%Y%m%d')}.html",
+        mime="text/html",
+        use_container_width=True
+    )
