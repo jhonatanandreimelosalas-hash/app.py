@@ -67,9 +67,9 @@ bucket = storage.bucket() if firebase_admin._apps else None
 # --- DATOS GLOBALES ---
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 INTEGRANTES_LISTA = [
-    "Saray Medina",
-    "sahra sofia águila vargas",
-    "shara Aguilar",
+    "Ivan Santiago Valencia",
+    "Luis Alejandro Martinez Rubio",
+    "Nicol Vanegas Cruz",
     "Jhonnattan Andrei Melo Salas"
 ]
 
@@ -349,7 +349,7 @@ if st.session_state.ia_abierta:
                     prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
                     
                     response = client.models.generate_content(
-                        model="gemini-2.5-flash",
+                        model="gemini-3.6-flash",
                         contents=prompt_completo,
                     )
                     st.success("Respuesta:")
