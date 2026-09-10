@@ -625,12 +625,104 @@ elif menu == "7. Gestión de Archivos":
     else:
         st.warning("Conecta Firebase para ver la lista de archivos.")
 elif menu == "8. Reporte Final":
-    st.markdown('<p class="main-header">📑 Descarga de Excel</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">📑 Reporte Financiero Profesional</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Genera y descarga un libro de Excel con diseño institucional avanzado.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
-    with pd.ExcelWriter(EXCEL_FILE, engine='openpyxl') as writer:
-        st.session_state.ingresos_df.drop(columns=['ID'], errors='ignore').to_excel(writer, sheet_name='Ingresos', index=False)
-        st.session_state.gastos_df.drop(columns=['ID'], errors='ignore').to_excel(writer, sheet_name='Gastos', index=False)
-    
-    with open(EXCEL_FILE, "rb") as f:
-        st.download_button("⬇️ Descargar Backup Excel", data=f, file_name="Proyecto_Financiero_Cloud.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    if st.button("📊 Generar Excel Profesional"):
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        wb = openpyxl.Workbook()
+        # Eliminar la hoja por defecto
+        wb.remove(wb.active)
+
+        # Paleta de colores (Azul institucional y grises suaves)
+        HEADER_FILL = PatternFill(start_color="1E3A8A", end_color="1E3A8A", fill_type="solid")
+        HEADER_FONT = Font(name="Arial", size=11, bold=True, color="FFFFFF")
+        TITLE_FONT = Font(name="Arial", size=16, bold=True, color="1E3A8A")
+        REGULAR_FONT = Font(name="Arial", size=10, color="333333")
+        BOLD_FONT = Font(name="Arial", size=10, bold=True, color="333333")
+        
+        THIN_BORDER = Border(
+            left=Side(style='thin', color='CBD5E1'),
+            right=Side(style='thin', color='CBD5E1'),
+            top=Side(style='thin', color='CBD5E1'),
+            bottom=Side(style='thin', color='CBD5E1')
+        )
+        
+        zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
+
+        def estilizar_hoja(ws, titulo, df):
+            # Título principal
+            ws.append([titulo])
+            ws.append([]) # Fila vacía
+            ws.cell(row=1, column=1).font = TITLE_FONT
+            
+            if df.empty:
+                ws.append(["No hay registros disponibles."])
+                return
+
+            # Escribir cabeceras
+            headers = [col for col in df.columns if col != 'ID']
+            ws.append(headers)
+            
+            # Formatear cabeceras
+            for col_num in range(1, len(headers) + 1):
+                cell = ws.cell(row=3, column=col_num)
+                cell.fill = HEADER_FILL
+                cell.font = HEADER_FONT
+                cell.alignment = Alignment(horizontal="center", vertical="center")
+                cell.border = THIN_BORDER
+
+            # Escribir datos
+            for row_idx, row in df.iterrows():
+                fila_datos = [row[col] for col in headers]
+                ws.append(fila_datos)
+                
+                current_row = ws.max_row
+                is_zebra = (row_idx % 2 != 0)
+                
+                for col_num in range(1, len(headers) + 1):
+                    cell = ws.cell(row=current_row, column=col_num)
+                    cell.font = REGULAR_FONT
+                    cell.border = THIN_BORDER
+                    if is_zebra:
+                        cell.fill = zebra_fill
+                        
+                    # Alinear a la derecha si es numérico (Valores)
+                    if headers[col_num - 1] == "Valor" and isinstance(cell.value, (int, float)):
+                        cell.number_format = '"$"#,##0'
+                        cell.alignment = Alignment(horizontal="right", vertical="center")
+                    else:
+                        cell.alignment = Alignment(horizontal="left", vertical="center")
+
+            # Ajustar automáticamente el ancho de las columnas
+            for col in ws.columns:
+                max_len = 0
+                col_letter = get_column_letter(col[0].column)
+                for cell in col:
+                    if cell.row > 2 and cell.value:  # Omitir título y fila vacía para el cálculo
+                        max_len = max(max_len, len(str(cell.value)))
+                ws.column_dimensions[col_letter].width = max(max_len + 5, 15)
+
+        # 1. Hoja de Ingresos
+        ws_ing = wb.create_sheet(title="Ingresos")
+        estilizar_hoja(ws_ing, "COLEGIO FRANCISCO DE PAULA SANTANDER - REPORTE DE INGRESOS", st.session_state.ingresos_df)
+
+        # 2. Hoja de Gastos
+        ws_gas = wb.create_sheet(title="Gastos")
+        estilizar_hoja(ws_gas, "COLEGIO FRANCISCO DE PAULA SANTANDER - REPORTE DE GASTOS", st.session_state.gastos_df)
+
+        wb.save(EXCEL_FILE)
+        st.success("✅ ¡Reporte Excel generado con éxito y diseño profesional!")
+
+    if os.path.exists(EXCEL_FILE):
+        with open(EXCEL_FILE, "rb") as f:
+            st.download_button(
+                "📥 Descargar Archivo Excel Profesional", 
+                data=f, 
+                file_name="Reporte_Financiero_Colegio.xlsx", 
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
