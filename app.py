@@ -14,6 +14,11 @@ import bcrypt
 import fitz  # PyMuPDF
 import firebase_admin
 from firebase_admin import credentials, firestore, storage
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+import random
+import string
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 st.set_page_config(
@@ -194,13 +199,40 @@ if not st.session_state.logged_in:
 
     with tab3:
         with st.form("forgot_form"):
-            st.info("Ingresa tu correo y te enviaremos las instrucciones de recuperación.")
+            st.info("Ingresa tu correo y te enviaremos una contraseña temporal de recuperación a tu bandeja.")
             email_forgot = st.text_input("Correo Electrónico registrado")
-            submit_forgot = st.form_submit_button("Recuperar Contraseña")
+            submit_forgot = st.form_submit_button("Enviar Contraseña Temporal")
             
             if submit_forgot and db:
-                if db.collection('usuarios').document(email_forgot.lower().strip()).get().exists:
-                    st.success(f"✅ Se ha enviado un correo con instrucciones a {email_forgot}.")
+                email_clean = email_forgot.lower().strip()
+                user_ref = db.collection('usuarios').document(email_clean)
+                user_doc = user_ref.get()
+                if user_doc.exists:
+                    # Generar clave temporal de 8 caracteres
+                    temp_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+                    user_ref.update({'password': hash_password(temp_pass)})
+                    
+                    try:
+                        remitente = st.secrets["smtp"]["email"]
+                        password_smtp = st.secrets["smtp"]["password"]
+                        
+                        msg = MIMEMultipart()
+                        msg['From'] = remitente
+                        msg['To'] = email_clean
+                        msg['Subject'] = "Recuperación de Contraseña - Colegio Francisco de Paula Santander"
+                        
+                        cuerpo = f"Hola,\n\nHas solicitado recuperar tu contraseña en el Portal Financiero.\nTu nueva contraseña temporal es: {temp_pass}\n\nInicia sesión con ella y recuerda cambiarla."
+                        msg.attach(MIMEText(cuerpo, 'plain'))
+                        
+                        server = smtplib.SMTP('smtp.gmail.com', 587)
+                        server.starttls()
+                        server.login(remitente, password_smtp)
+                        server.sendmail(remitente, email_clean, msg.as_string())
+                        server.quit()
+                        
+                        st.success(f"✅ ¡Correo enviado exitosamente a {email_clean}! Revisa tu bandeja de entrada o spam.")
+                    except Exception as e:
+                        st.error(f"Error al enviar el correo. Asegúrate de configurar los secretos [smtp] en Streamlit. Detalle: {e}")
                 else:
                     st.error("El correo no está registrado en nuestra base de datos.")
     
