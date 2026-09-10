@@ -547,7 +547,7 @@ elif menu == "6. Anexo de Recibos & QR":
 
 elif menu == "7. Gestión de Archivos":
     st.markdown('<p class="main-header">📁 Repositorio de Documentos</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Registra, administra y descarga los comprobantes y documentos del proyecto.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Registra, administra y visualiza los comprobantes del proyecto.</p>', unsafe_allow_html=True)
     st.markdown("---")
     
     import base64
@@ -559,7 +559,6 @@ elif menu == "7. Gestión de Archivos":
         
         if submit_archivo and db:
             if archivo_subido is not None:
-                # Convertir el archivo binario a Base64 para guardarlo en Firestore gratis
                 bytes_archivo = archivo_subido.getvalue()
                 base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
                 
@@ -568,7 +567,7 @@ elif menu == "7. Gestión de Archivos":
                     "ID": nombre_id,
                     "nombre": archivo_subido.name,
                     "tipo": archivo_subido.type,
-                    "archivo_b64": base64_archivo, # Guardamos el archivo codificado
+                    "archivo_b64": base64_archivo,
                     "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
                     "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
@@ -579,7 +578,7 @@ elif menu == "7. Gestión de Archivos":
             else:
                 st.error("⚠️ Por favor selecciona un archivo antes de guardar.")
 
-    st.markdown("### 📋 Archivos Registrados y Disponibles para Descargar")
+    st.markdown("### 📋 Archivos Registrados con Vista Previa")
     if db:
         try:
             archivos_ref = db.collection("archivos").stream()
@@ -591,9 +590,15 @@ elif menu == "7. Gestión de Archivos":
                         st.write(f"**Descripción:** {row['descripcion']}")
                         st.write(f"**Subido por:** {row['subido_por']}")
                         
-                        # Botón para descargar el archivo guardado
                         if "archivo_b64" in row:
                             b64_bytes = base64.b64decode(row['archivo_b64'])
+                            
+                            # Mostrar mini recuadro de vista previa si es imagen
+                            if row['tipo'].startswith('image/'):
+                                st.image(b64_bytes, caption="Vista previa", width=250)
+                            elif row['tipo'] == 'application/pdf':
+                                st.info("📎 Archivo PDF (Usa el botón de abajo para descargarlo y abrirlo)")
+                            
                             st.download_button(
                                 label=f"📥 Descargar / Abrir {row['nombre']}",
                                 data=b64_bytes,
