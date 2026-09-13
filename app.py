@@ -595,32 +595,38 @@ if st.sidebar.button("💬 Abrir / Cerrar Asistente IA"):
 if st.session_state.ia_abierta:
     with st.sidebar.container():
         st.markdown("### 🧠 Chat Asesor IA")
-        api_key_input = st.text_input("Clave de API Gemini:", type="password", key="api_key_ia")
-        pregunta_ia = st.text_input("¿Qué deseas consultar?")
 
-        if st.button("Consultar IA"):
-            if not api_key_input:
-                st.error("⚠️ Introduce tu clave de API.")
-            else:
-                try:
-                    from google import genai
-                    client = genai.Client(api_key=api_key_input)
+        # La clave ya no se pide en pantalla — se lee de tus secrets ([gemini] api_key = "...").
+        gemini_api_key = st.secrets.get("gemini", {}).get("api_key") if "gemini" in st.secrets else None
 
-                    tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
-                    tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
-                    saldo = tot_ing - tot_gas
+        if not gemini_api_key:
+            st.warning("⚠️ Falta configurar la clave de Gemini en los secrets del proyecto (sección [gemini]).")
+        else:
+            pregunta_ia = st.text_input("¿Qué deseas consultar?")
 
-                    contexto = f"Datos del proyecto: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
-                    prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
+            if st.button("Consultar IA"):
+                if not pregunta_ia.strip():
+                    st.error("⚠️ Escribe una pregunta antes de consultar.")
+                else:
+                    try:
+                        from google import genai
+                        client = genai.Client(api_key=gemini_api_key)
 
-                    response = client.models.generate_content(
-                        model="gemini-3.6-flash",
-                        contents=prompt_completo,
-                    )
-                    st.success("Respuesta:")
-                    st.write(response.text)
-                except Exception as e:
-                    st.error(f"Error con la IA: {e}")
+                        tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
+                        tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+                        saldo = tot_ing - tot_gas
+
+                        contexto = f"Datos del proyecto: Ingresos=${tot_ing}, Gastos=${tot_gas}, Saldo=${saldo}."
+                        prompt_completo = f"{contexto}\nPregunta: {pregunta_ia}"
+
+                        response = client.models.generate_content(
+                            model="gemini-3.6-flash",
+                            contents=prompt_completo,
+                        )
+                        st.success("Respuesta:")
+                        st.write(response.text)
+                    except Exception as e:
+                        st.error(f"Error con la IA: {e}")
 
 # --- RUTAS DE LAS PÁGINAS ---
 import datetime
