@@ -8,3 +8,4 @@ google-genai
 firebase-admin
 bcrypt
 pymupdf
+reportlab
