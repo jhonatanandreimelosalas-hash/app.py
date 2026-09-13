@@ -29,17 +29,50 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# --- ESTILOS CSS ---
-st.markdown("""
+# --- ESTILOS CSS (tema claro/oscuro dinámico) ---
+if 'modo_oscuro' not in st.session_state:
+    st.session_state.modo_oscuro = False
+
+
+def render_estilos(modo_oscuro: bool) -> str:
+    """Devuelve el bloque <style> según el modo activo. Paleta sobria institucional
+    en ambos casos; solo cambian fondo, superficies y contraste de texto."""
+    if modo_oscuro:
+        fondo_app = "#0F172A"
+        superficie = "#1E293B"
+        borde = "#334155"
+        texto_principal = "#E2E8F0"
+        texto_secundario = "#94A3B8"
+        acento = "#3B82F6"
+        acento_hover = "#60A5FA"
+    else:
+        fondo_app = "#FFFFFF"
+        superficie = "#F8FAFC"
+        borde = "#E2E8F0"
+        texto_principal = "#1E293B"
+        texto_secundario = "#4B5563"
+        acento = "#1E3A8A"
+        acento_hover = "#2563EB"
+
+    return f"""
     <style>
-        .main-header { font-size: 2.3rem; color: #1E3A8A; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }
-        .sub-header { font-size: 1.1rem; color: #4B5563; margin-bottom: 20px; }
-        .stButton>button { width: 100%; border-radius: 8px; font-weight: 600; background-color: #1E3A8A; color: white; transition: 0.3s; }
-        .stButton>button:hover { background-color: #2563EB; border-color: #2563EB; }
-        div.stMetric { background-color: #F8FAFC; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05); border: 1px solid #E2E8F0; }
-        .file-card { border: 1px solid #E2E8F0; border-radius: 10px; padding: 10px; text-align: center; background-color: white; margin-bottom: 15px;}
+        .stApp {{ background-color: {fondo_app}; color: {texto_principal}; }}
+        .main-header {{ font-size: 2.3rem; color: {acento}; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }}
+        .sub-header {{ font-size: 1.1rem; color: {texto_secundario}; margin-bottom: 20px; }}
+        .stButton>button {{ width: 100%; border-radius: 8px; font-weight: 600; background-color: {acento}; color: white; transition: 0.3s; border: none; }}
+        .stButton>button:hover {{ background-color: {acento_hover}; border-color: {acento_hover}; }}
+        div.stMetric {{ background-color: {superficie}; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15); border: 1px solid {borde}; }}
+        .file-card {{ border: 1px solid {borde}; border-radius: 10px; padding: 10px; text-align: center; background-color: {superficie}; margin-bottom: 15px; }}
+        section[data-testid="stSidebar"] {{ background-color: {superficie}; }}
+        .stDataFrame, .stTable {{ background-color: {superficie}; }}
+        p, span, label, .stMarkdown {{ color: {texto_principal}; }}
     </style>
-""", unsafe_allow_html=True)
+    """
+
+
+st.markdown(render_estilos(st.session_state.modo_oscuro), unsafe_allow_html=True)
+
+st.sidebar.toggle("🌙 Modo oscuro", key="modo_oscuro")
 
 # --- INICIALIZACIÓN DE FIREBASE ---
 FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com'
@@ -168,6 +201,158 @@ def eliminar_registro_nube(coleccion, doc_id):
             db.collection('usuarios').document(institucion_id).collection(coleccion).document(doc_id).delete()
         except Exception:
             pass
+
+
+CATEGORIAS_GASTO = ["Logística", "Publicidad", "Alimentación", "Varios"]
+
+
+def cargar_presupuestos_categoria():
+    """Lee el presupuesto asignado por categoría desde el documento de la institución.
+    Si no existe todavía, devuelve un diccionario en ceros."""
+    if not db:
+        return {cat: 0.0 for cat in CATEGORIAS_GASTO}
+    institucion_id = get_institucion_id()
+    if not institucion_id:
+        return {cat: 0.0 for cat in CATEGORIAS_GASTO}
+    try:
+        doc = db.collection('usuarios').document(institucion_id).get()
+        datos = doc.to_dict() or {}
+        guardado = datos.get('presupuestos_categoria', {})
+        return {cat: float(guardado.get(cat, 0.0)) for cat in CATEGORIAS_GASTO}
+    except Exception:
+        return {cat: 0.0 for cat in CATEGORIAS_GASTO}
+
+
+def guardar_presupuestos_categoria(presupuestos: dict):
+    if not db:
+        return
+    institucion_id = get_institucion_id()
+    if not institucion_id:
+        return
+    try:
+        db.collection('usuarios').document(institucion_id).set(
+            {'presupuestos_categoria': presupuestos}, merge=True
+        )
+    except Exception:
+        pass
+
+
+def calcular_tabla_desviaciones(gastos_df, presupuestos_categoria):
+    """Calcula gasto real vs. presupuesto asignado por categoría. Se usa tanto en el
+    Tablero Ejecutivo (sección 5) como en el Reporte PDF Corporativo (sección 8), para
+    que ambos muestren siempre el mismo número."""
+    df_gastos_cat = gastos_df.copy() if gastos_df is not None and not gastos_df.empty else pd.DataFrame(columns=["Categoría", "Valor"])
+    if "Valor" not in df_gastos_cat.columns:
+        df_gastos_cat["Valor"] = 0.0
+    df_gastos_cat["Valor"] = pd.to_numeric(df_gastos_cat["Valor"], errors='coerce').fillna(0)
+    gasto_real_por_cat = df_gastos_cat.groupby("Categoría")["Valor"].sum() if "Categoría" in df_gastos_cat.columns and not df_gastos_cat.empty else pd.Series(dtype=float)
+
+    df_desviacion = pd.DataFrame({
+        "Categoría": CATEGORIAS_GASTO,
+        "Gasto Real": [gasto_real_por_cat.get(c, 0.0) for c in CATEGORIAS_GASTO],
+        "Presupuesto Asignado": [presupuestos_categoria.get(c, 0.0) for c in CATEGORIAS_GASTO],
+    })
+    df_desviacion["Desviación"] = df_desviacion["Gasto Real"] - df_desviacion["Presupuesto Asignado"]
+    df_desviacion["Estado"] = df_desviacion["Desviación"].apply(lambda d: "Sobre presupuesto" if d > 0 else "Dentro de presupuesto")
+    return df_desviacion
+
+
+# =====================================================================================
+# OCR DE FACTURAS Y DETECCIÓN DE ANOMALÍAS (reglas, no IA, para duplicados/desviaciones)
+# -------------------------------------------------------------------------------------
+# La extracción de datos de la factura sí usa IA (Gemini, multimodal — reutiliza la
+# misma clave [gemini] api_key que ya tienes configurada para el Asistente IA).
+# La detección de anomalías es intencionalmente por reglas simples y explicables
+# (no un modelo de IA): así cada alerta tiene un motivo concreto que un humano puede
+# verificar, en vez de una "caja negra" diciendo que algo se ve raro.
+# =====================================================================================
+
+def extraer_datos_factura_gemini(archivo_bytes, mime_type, api_key):
+    """Envía la imagen/PDF de una factura a Gemini y devuelve un diccionario con los
+    campos extraídos, o None si la extracción falla."""
+    try:
+        from google import genai
+        from google.genai import types
+        import json as json_lib
+
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Eres un asistente que extrae datos de facturas y comprobantes de gasto escolares. "
+            "Analiza la imagen o documento adjunto y responde ÚNICAMENTE con un objeto JSON "
+            "(sin texto adicional, sin explicaciones, sin backticks de markdown), con "
+            "exactamente estas claves:\n"
+            '{"concepto": "descripción breve de qué se compró o pagó", '
+            '"valor": numero_sin_simbolos_ni_comas_ni_texto, '
+            '"fecha": "YYYY-MM-DD si es visible en el documento, o null si no se ve", '
+            '"categoria_sugerida": "una de estas exactas: Logística, Publicidad, Alimentación, Varios", '
+            '"numero_factura": "el número o folio de la factura si es visible, o null"}'
+        )
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=[
+                types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+                prompt,
+            ],
+        )
+        texto_respuesta = response.text.strip().replace("```json", "").replace("```", "").strip()
+        return json_lib.loads(texto_respuesta)
+    except Exception as e:
+        st.error(f"No se pudieron extraer los datos de la factura automáticamente: {e}")
+        return None
+
+
+def detectar_anomalias_gasto(nuevo_valor, nueva_fecha, nuevo_concepto, nueva_categoria,
+                               gastos_existentes_df, presupuesto_tope_general, presupuestos_categoria):
+    """Aplica reglas simples sobre un gasto candidato (duplicidad, desviación de
+    presupuesto general, desviación de presupuesto por categoría, monto atípico frente
+    al historial). Devuelve una lista de motivos en texto plano — lista vacía significa
+    que no se detectó ninguna anomalía."""
+    import difflib
+
+    motivos = []
+    if gastos_existentes_df is None or gastos_existentes_df.empty:
+        gastos_existentes_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor"])
+
+    df_temp = gastos_existentes_df.copy()
+    df_temp["Valor"] = pd.to_numeric(df_temp["Valor"], errors='coerce').fillna(0)
+
+    # --- Duplicidad: mismo valor, fecha cercana (±5 días) y concepto parecido ---
+    if not df_temp.empty:
+        df_temp["FechaDT"] = pd.to_datetime(df_temp["Fecha"], errors='coerce')
+        fecha_nueva_dt = pd.to_datetime(nueva_fecha, errors='coerce')
+        for _, fila in df_temp.iterrows():
+            mismo_valor = abs(fila["Valor"] - nuevo_valor) < 1
+            fecha_cercana = (
+                pd.notna(fila["FechaDT"]) and pd.notna(fecha_nueva_dt)
+                and abs((fila["FechaDT"] - fecha_nueva_dt).days) <= 5
+            )
+            similitud = difflib.SequenceMatcher(None, str(fila["Concepto"]).lower(), str(nuevo_concepto).lower()).ratio()
+            if mismo_valor and fecha_cercana and similitud > 0.55:
+                motivos.append(f"Posible duplicado: se parece a '{fila['Concepto']}' del {fila['Fecha']}, por el mismo valor.")
+                break
+
+    # --- Desviación del presupuesto general ---
+    if presupuesto_tope_general and presupuesto_tope_general > 0:
+        total_actual = df_temp["Valor"].sum()
+        if (total_actual + nuevo_valor) > presupuesto_tope_general:
+            motivos.append("Supera el presupuesto general disponible.")
+
+    # --- Desviación del presupuesto asignado a la categoría ---
+    presupuesto_cat = (presupuestos_categoria or {}).get(nueva_categoria, 0.0)
+    if presupuesto_cat and presupuesto_cat > 0:
+        gasto_cat_actual = df_temp[df_temp.get("Categoría") == nueva_categoria]["Valor"].sum() if "Categoría" in df_temp.columns else 0.0
+        if (gasto_cat_actual + nuevo_valor) > presupuesto_cat:
+            motivos.append(f"Supera el presupuesto asignado a la categoría '{nueva_categoria}'.")
+
+    # --- Monto atípico frente al historial de esa categoría (requiere al menos 3 datos) ---
+    if "Categoría" in df_temp.columns:
+        df_cat_hist = df_temp[df_temp["Categoría"] == nueva_categoria]
+        if len(df_cat_hist) >= 3:
+            promedio_cat = df_cat_hist["Valor"].mean()
+            if promedio_cat > 0 and nuevo_valor > promedio_cat * 2.5:
+                motivos.append(f"Monto inusualmente alto frente al promedio histórico de la categoría (${promedio_cat:,.0f}).")
+
+    return motivos
 
 
 # =====================================================================================
@@ -338,32 +523,6 @@ def procesar_callback_google():
         st.query_params.clear()
 
 
-# --- FUNCIÓN PARA IMPORTAR DATOS DESDE EXCEL (Ingresos/Gastos) ---
-def procesar_excel_importado(archivo_excel, columnas_esperadas):
-    """Lee un Excel subido por el usuario y renombra sus columnas para que
-    coincidan con columnas_esperadas, sin importar mayúsculas/minúsculas o
-    espacios extra en los encabezados. Devuelve (dataframe, columnas_faltantes)."""
-    df_excel = pd.read_excel(archivo_excel, engine="openpyxl")
-    mapa_normalizado = {str(col).strip().lower(): col for col in df_excel.columns}
-    renombrar = {}
-    columnas_faltantes = []
-    for esperada in columnas_esperadas:
-        clave = esperada.strip().lower()
-        if clave in mapa_normalizado:
-            renombrar[mapa_normalizado[clave]] = esperada
-        else:
-            columnas_faltantes.append(esperada)
-    df_excel = df_excel.rename(columns=renombrar)
-    return df_excel, columnas_faltantes
-
-
-def normalizar_fecha_excel(valor):
-    """Convierte una celda de fecha de Excel (Timestamp, date o texto) a 'YYYY-MM-DD'."""
-    if hasattr(valor, "strftime"):
-        return valor.strftime("%Y-%m-%d")
-    return str(valor).strip()
-
-
 # --- FUNCIÓN GENERAR MINIATURA PDF ---
 def generar_miniatura_pdf(file_bytes):
     try:
@@ -438,6 +597,120 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil):
     base_img.save(buffer_img, format="PNG")
     buffer_img.seek(0)
     return buffer_img
+
+
+# =====================================================================================
+# EXPORTACIÓN: REPORTE PDF CORPORATIVO
+# -------------------------------------------------------------------------------------
+# Formal y con la identidad visual del proyecto (mismo azul institucional #1E3A8A),
+# pero sin firma digital ni certificación legal — eso requiere un certificado real de
+# una autoridad certificadora, que está fuera del alcance de lo que este código puede
+# proveer por sí solo.
+# =====================================================================================
+
+def _estilo_tabla_corporativo():
+    from reportlab.platypus import TableStyle
+    from reportlab.lib import colors
+    return TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#1E3A8A')),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8.5),
+        ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#E2E8F0')),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F8FAFC')]),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+    ])
+
+
+def generar_reporte_pdf_corporativo(nombre_institucion, df_ingresos, df_gastos, df_desviacion):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.units import cm
+    from reportlab.platypus import SimpleDocTemplate, Table, Paragraph, Spacer, PageBreak
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+
+    buffer_pdf = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer_pdf, pagesize=letter,
+        topMargin=2.2 * cm, bottomMargin=2 * cm, leftMargin=1.8 * cm, rightMargin=1.8 * cm
+    )
+    styles = getSampleStyleSheet()
+    estilo_titulo = ParagraphStyle('TituloCorp', parent=styles['Title'], textColor=colors.HexColor('#1E3A8A'), fontSize=20)
+    estilo_subtitulo = ParagraphStyle('SubtituloCorp', parent=styles['Normal'], textColor=colors.HexColor('#4B5563'), fontSize=10)
+    estilo_seccion = ParagraphStyle('SeccionCorp', parent=styles['Heading2'], textColor=colors.HexColor('#1E3A8A'), spaceBefore=14, spaceAfter=8)
+
+    total_ing = pd.to_numeric(df_ingresos["Valor"], errors='coerce').sum() if not df_ingresos.empty else 0.0
+    total_gas = pd.to_numeric(df_gastos["Valor"], errors='coerce').sum() if not df_gastos.empty else 0.0
+    balance = total_ing - total_gas
+    estado = "Superávit" if balance >= 0 else "Déficit"
+
+    story = [
+        Paragraph(nombre_institucion.upper(), estilo_titulo),
+        Paragraph("Reporte Financiero Corporativo", estilo_subtitulo),
+        Paragraph(f"Generado el {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", estilo_subtitulo),
+        Spacer(1, 16),
+        Paragraph("Balance General", estilo_seccion),
+    ]
+
+    tabla_balance = Table(
+        [["Concepto", "Valor"],
+         ["Total Ingresos", f"${total_ing:,.0f}"],
+         ["Total Gastos", f"${total_gas:,.0f}"],
+         [f"Balance Neto ({estado})", f"${balance:,.0f}"]],
+        colWidths=[10 * cm, 6 * cm]
+    )
+    tabla_balance.setStyle(_estilo_tabla_corporativo())
+    story.append(tabla_balance)
+
+    if df_desviacion is not None and not df_desviacion.empty:
+        story.append(Paragraph("Desviaciones Presupuestarias por Categoría", estilo_seccion))
+        filas_desv = [["Categoría", "Gasto Real", "Presupuesto", "Desviación"]]
+        for _, fila in df_desviacion.iterrows():
+            filas_desv.append([
+                fila["Categoría"], f"${fila['Gasto Real']:,.0f}",
+                f"${fila['Presupuesto Asignado']:,.0f}", f"${fila['Desviación']:,.0f}",
+            ])
+        tabla_desv = Table(filas_desv, colWidths=[4 * cm, 4 * cm, 4 * cm, 4 * cm])
+        tabla_desv.setStyle(_estilo_tabla_corporativo())
+        story.append(tabla_desv)
+
+    story.append(PageBreak())
+    story.append(Paragraph("Detalle de Ingresos", estilo_seccion))
+    if not df_ingresos.empty:
+        columnas_ing = [c for c in df_ingresos.columns if c != "ID"]
+        filas_ing = [columnas_ing] + df_ingresos[columnas_ing].astype(str).values.tolist()
+        tabla_ing = Table(filas_ing, repeatRows=1)
+        tabla_ing.setStyle(_estilo_tabla_corporativo())
+        story.append(tabla_ing)
+    else:
+        story.append(Paragraph("No hay ingresos registrados.", styles['Normal']))
+
+    story.append(Spacer(1, 16))
+    story.append(Paragraph("Detalle de Gastos", estilo_seccion))
+    if not df_gastos.empty:
+        columnas_gas = [c for c in df_gastos.columns if c != "ID"]
+        filas_gas = [columnas_gas] + df_gastos[columnas_gas].astype(str).values.tolist()
+        tabla_gas = Table(filas_gas, repeatRows=1)
+        tabla_gas.setStyle(_estilo_tabla_corporativo())
+        story.append(tabla_gas)
+    else:
+        story.append(Paragraph("No hay gastos registrados.", styles['Normal']))
+
+    def pie_de_pagina(canvas_obj, doc_obj):
+        canvas_obj.saveState()
+        canvas_obj.setFont('Helvetica', 8)
+        canvas_obj.setFillColor(colors.HexColor('#94A3B8'))
+        canvas_obj.drawString(1.8 * cm, 1.2 * cm, nombre_institucion)
+        canvas_obj.drawRightString(letter[0] - 1.8 * cm, 1.2 * cm, f"Página {doc_obj.page}")
+        canvas_obj.restoreState()
+
+    doc.build(story, onFirstPage=pie_de_pagina, onLaterPages=pie_de_pagina)
+    buffer_pdf.seek(0)
+    return buffer_pdf
+
 
 # --- PANTALLAS DE AUTENTICACIÓN ---
 if not st.session_state.logged_in:
@@ -611,6 +884,7 @@ menu = st.sidebar.selectbox("📌 Selecciona una sección:", [
     "7. Gestión de Archivos",
     "8. Reporte Final",
     "9. Auditoría del Sistema",
+    "10. Facturas (OCR) y Anomalías",
 ])
 # --- APARTADO DE IA EN EL BORDE ---
 st.sidebar.markdown("---")
@@ -708,43 +982,6 @@ elif menu == "2. Registro de Ingresos":
                     st.success("¡Ingreso guardado en la nube!")
                     st.rerun()
 
-    with st.expander("📥 Importar Ingresos desde Excel", expanded=False):
-        st.caption("El archivo debe tener columnas: **Fecha, Concepto, Valor, Responsable** (Observaciones es opcional). El orden no importa y no distingue mayúsculas/minúsculas.")
-        archivo_excel_ing = st.file_uploader("Selecciona tu archivo .xlsx", type=["xlsx"], key="upload_excel_ingresos")
-
-        if archivo_excel_ing is not None:
-            if st.button("📤 Importar datos del Excel", key="btn_importar_ingresos"):
-                columnas_esperadas = ["Fecha", "Concepto", "Valor", "Responsable"]
-                df_excel, faltantes = procesar_excel_importado(archivo_excel_ing, columnas_esperadas)
-
-                if faltantes:
-                    st.error(f"⚠️ Al archivo le faltan estas columnas: {', '.join(faltantes)}")
-                else:
-                    importados, con_error = 0, 0
-                    for idx, fila in df_excel.iterrows():
-                        try:
-                            reg_id = f"ING-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}-{idx}"
-                            nuevo_reg = {
-                                "ID": reg_id,
-                                "Fecha": normalizar_fecha_excel(fila["Fecha"]),
-                                "Concepto": str(fila["Concepto"]).strip(),
-                                "Valor": float(fila["Valor"]),
-                                "Responsable": str(fila["Responsable"]).strip(),
-                                "Observaciones": str(fila["Observaciones"]).strip() if "Observaciones" in df_excel.columns and pd.notna(fila.get("Observaciones")) else "",
-                            }
-                            st.session_state.ingresos_df = pd.concat([st.session_state.ingresos_df, pd.DataFrame([nuevo_reg])], ignore_index=True)
-                            guardar_registro_nube('ingresos', nuevo_reg)
-                            importados += 1
-                        except Exception:
-                            con_error += 1
-
-                    registrar_auditoria("Importó Excel de Ingresos", f"{importados} registros importados, {con_error} con error")
-                    mensaje = f"✅ Se importaron {importados} ingresos."
-                    if con_error:
-                        mensaje += f" ⚠️ {con_error} filas se omitieron por datos inválidos."
-                    st.success(mensaje)
-                    st.rerun()
-
     if not st.session_state.ingresos_df.empty:
         st.dataframe(st.session_state.ingresos_df.drop(columns=['ID']), use_container_width=True)
         st.metric("💵 TOTAL INGRESOS", f"${st.session_state.ingresos_df['Valor'].astype(float).sum():,.0f} COP")
@@ -779,7 +1016,7 @@ elif menu == "3. Registro de Gastos":
             with c1:
                 f_gas = st.date_input("Fecha Gasto", value=datetime.date.today())
                 con_gas = st.text_input("Concepto")
-                cat_gas = st.selectbox("Categoría", ["Logística", "Publicidad", "Alimentación", "Varios"])
+                cat_gas = st.selectbox("Categoría", CATEGORIAS_GASTO)
             with c2:
                 val_gas = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
                 resp_gas = st.selectbox("Responsable", INTEGRANTES_LISTA)
@@ -801,48 +1038,6 @@ elif menu == "3. Registro de Gastos":
                     guardar_registro_nube('gastos', nuevo_reg)
                     registrar_auditoria("Registró Gasto", f"{con_gas} - ${val_gas:,.0f} (Categoría: {cat_gas}, Responsable: {resp_gas})")
                     st.success("¡Gasto guardado en la nube!")
-                    st.rerun()
-
-    with st.expander("📥 Importar Gastos desde Excel", expanded=False):
-        st.caption("El archivo debe tener columnas: **Fecha, Concepto, Valor, Responsable** (Categoría es opcional — si falta, se asigna 'Varios'). El orden no importa y no distingue mayúsculas/minúsculas.")
-        archivo_excel_gas = st.file_uploader("Selecciona tu archivo .xlsx", type=["xlsx"], key="upload_excel_gastos")
-
-        if archivo_excel_gas is not None:
-            if st.button("📤 Importar datos del Excel", key="btn_importar_gastos"):
-                columnas_esperadas = ["Fecha", "Concepto", "Valor", "Responsable"]
-                df_excel, faltantes = procesar_excel_importado(archivo_excel_gas, columnas_esperadas)
-
-                if faltantes:
-                    st.error(f"⚠️ Al archivo le faltan estas columnas: {', '.join(faltantes)}")
-                else:
-                    categorias_validas = ["Logística", "Publicidad", "Alimentación", "Varios"]
-                    importados, con_error = 0, 0
-                    for idx, fila in df_excel.iterrows():
-                        try:
-                            categoria_fila = str(fila["Categoría"]).strip() if "Categoría" in df_excel.columns and pd.notna(fila.get("Categoría")) else "Varios"
-                            if categoria_fila not in categorias_validas:
-                                categoria_fila = "Varios"
-
-                            reg_id = f"GAS-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}-{idx}"
-                            nuevo_reg = {
-                                "ID": reg_id,
-                                "Fecha": normalizar_fecha_excel(fila["Fecha"]),
-                                "Concepto": str(fila["Concepto"]).strip(),
-                                "Categoría": categoria_fila,
-                                "Valor": float(fila["Valor"]),
-                                "Responsable": str(fila["Responsable"]).strip(),
-                            }
-                            st.session_state.gastos_df = pd.concat([st.session_state.gastos_df, pd.DataFrame([nuevo_reg])], ignore_index=True)
-                            guardar_registro_nube('gastos', nuevo_reg)
-                            importados += 1
-                        except Exception:
-                            con_error += 1
-
-                    registrar_auditoria("Importó Excel de Gastos", f"{importados} registros importados, {con_error} con error")
-                    mensaje = f"✅ Se importaron {importados} gastos."
-                    if con_error:
-                        mensaje += f" ⚠️ {con_error} filas se omitieron por datos inválidos."
-                    st.success(mensaje)
                     st.rerun()
 
     if not st.session_state.gastos_df.empty:
@@ -926,6 +1121,77 @@ elif menu == "5. Dashboard y Gráficos":
             st.info("Las fechas registradas no tienen un formato válido para la línea de tiempo.")
     else:
         st.info("Registra ingresos o gastos para ver la línea de tiempo.")
+
+    # =====================================================================================
+    # TABLERO EJECUTIVO: desviaciones presupuestarias por categoría, con drill-down.
+    # Requiere Streamlit >= 1.35 para las selecciones de gráfico (on_select="rerun").
+    # Si tu versión es anterior, el gráfico se ve igual pero el clic no filtra la tabla.
+    # =====================================================================================
+    st.markdown("---")
+    st.markdown('<p class="main-header" style="font-size:1.6rem;">🎯 Tablero Ejecutivo — Desviaciones Presupuestarias</p>', unsafe_allow_html=True)
+
+    with st.expander("⚙️ Configurar presupuesto asignado por categoría"):
+        presupuestos_actuales = cargar_presupuestos_categoria()
+        nuevos_presupuestos = {}
+        cols_presupuesto = st.columns(len(CATEGORIAS_GASTO))
+        for col, categoria in zip(cols_presupuesto, CATEGORIAS_GASTO):
+            with col:
+                nuevos_presupuestos[categoria] = st.number_input(
+                    categoria, min_value=0.0, value=presupuestos_actuales.get(categoria, 0.0),
+                    step=50000.0, key=f"presupuesto_{categoria}"
+                )
+        if st.button("💾 Guardar presupuestos por categoría"):
+            guardar_presupuestos_categoria(nuevos_presupuestos)
+            registrar_auditoria("Actualizó presupuestos por categoría", str(nuevos_presupuestos))
+            st.success("Presupuestos actualizados.")
+            st.rerun()
+
+    presupuestos_categoria = cargar_presupuestos_categoria()
+
+    if not st.session_state.gastos_df.empty:
+        df_gastos_cat = st.session_state.gastos_df.copy()
+        df_gastos_cat["Valor"] = pd.to_numeric(df_gastos_cat["Valor"], errors='coerce').fillna(0)
+        df_desviacion = calcular_tabla_desviaciones(st.session_state.gastos_df, presupuestos_categoria)
+
+        fig_desviacion = px.bar(
+            df_desviacion, x="Categoría", y=["Gasto Real", "Presupuesto Asignado"],
+            barmode="group", text_auto=True,
+            color_discrete_map={"Gasto Real": "#EF4444", "Presupuesto Asignado": "#94A3B8"},
+            title="Gasto real vs. presupuesto asignado por categoría — haz clic en una barra para ver el detalle"
+        )
+
+        try:
+            evento = st.plotly_chart(
+                fig_desviacion, use_container_width=True,
+                on_select="rerun", selection_mode="points", key="chart_desviaciones"
+            )
+            categoria_seleccionada = None
+            puntos = evento.get("selection", {}).get("points", []) if evento else []
+            if puntos:
+                categoria_seleccionada = puntos[0].get("x")
+        except TypeError:
+            # Streamlit < 1.35: no soporta on_select. Se muestra el gráfico sin drill-down.
+            st.plotly_chart(fig_desviacion, use_container_width=True)
+            categoria_seleccionada = None
+            st.caption("ℹ️ Actualiza Streamlit a la versión 1.35 o superior para habilitar el drill-down por clic.")
+
+        st.dataframe(
+            df_desviacion.style.apply(
+                lambda fila: ['background-color: #FEE2E2' if fila["Desviación"] > 0 else '' for _ in fila], axis=1
+            ),
+            use_container_width=True, hide_index=True
+        )
+
+        if categoria_seleccionada:
+            st.markdown(f"#### 🔍 Detalle de transacciones — {categoria_seleccionada}")
+            detalle_cat = df_gastos_cat[df_gastos_cat["Categoría"] == categoria_seleccionada].drop(columns=['ID'], errors='ignore')
+            if not detalle_cat.empty:
+                st.dataframe(detalle_cat, use_container_width=True, hide_index=True)
+            else:
+                st.info("No hay transacciones registradas en esta categoría todavía.")
+    else:
+        st.info("Registra gastos para ver el tablero de desviaciones presupuestarias.")
+
 elif menu == "6. Anexo de Recibos & QR":
     st.markdown('<p class="main-header">🧾 Generador de Comprobante General</p>', unsafe_allow_html=True)
     st.markdown("---")
@@ -974,7 +1240,7 @@ elif menu == "7. Gestión de Archivos":
                 bytes_archivo = archivo_subido.getvalue()
                 base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
 
-                nombre_id = f"ARCH-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                nombre_id = f"ARCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 institucion_id = get_institucion_id()
                 doc_data = {
                     "ID": nombre_id,
@@ -982,7 +1248,7 @@ elif menu == "7. Gestión de Archivos":
                     "tipo": archivo_subido.type,
                     "archivo_b64": base64_archivo,
                     "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
-                    "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
                 }
                 db.collection("usuarios").document(institucion_id).collection("archivos").document(nombre_id).set(doc_data)
@@ -1104,7 +1370,7 @@ elif menu == "8. Reporte Final":
                     if is_zebra:
                         cell.fill = zebra_fill
 
-                    if headers[col_num - 1] == "Valor" and isinstance(cell.value, (int, float)):
+                    if headers[col_num - 1] in ("Valor", "Gasto Real", "Presupuesto Asignado", "Desviación") and isinstance(cell.value, (int, float)):
                         cell.number_format = '"$"#,##0'
                         cell.alignment = Alignment(horizontal="right", vertical="center")
                     else:
@@ -1141,6 +1407,32 @@ elif menu == "8. Reporte Final":
         ws_gas = wb.create_sheet(title="Gastos")
         estilizar_hoja(ws_gas, "REPORTE DE GASTOS", df_gas)
 
+        # --- Hoja adicional: Desviaciones por Categoría, con gráfico de barras embebido ---
+        from openpyxl.chart import BarChart, Reference
+
+        presupuestos_cat_excel = cargar_presupuestos_categoria()
+        df_desv_excel = calcular_tabla_desviaciones(df_gas, presupuestos_cat_excel)
+        df_desv_excel_tabla = df_desv_excel[["Categoría", "Gasto Real", "Presupuesto Asignado"]].copy()
+
+        ws_desv = wb.create_sheet(title="Desviaciones por Categoría")
+        estilizar_hoja(ws_desv, "DESVIACIONES PRESUPUESTARIAS POR CATEGORÍA", df_desv_excel_tabla)
+        # estilizar_hoja escribe: fila 1 = título, fila 2 = vacía, fila 3 = encabezados,
+        # filas 4..N = datos. Como esta tabla no tiene columna 'ID', las 3 columnas
+        # (Categoría, Gasto Real, Presupuesto Asignado) ocupan A, B y C tal cual.
+
+        grafico_desv = BarChart()
+        grafico_desv.title = "Gasto Real vs. Presupuesto Asignado"
+        grafico_desv.y_axis.title = "Valor ($)"
+        grafico_desv.x_axis.title = "Categoría"
+        fila_encabezado = 3
+        fila_fin = 3 + len(df_desv_excel_tabla)
+        datos_grafico = Reference(ws_desv, min_col=2, max_col=3, min_row=fila_encabezado, max_row=fila_fin)
+        categorias_grafico = Reference(ws_desv, min_col=1, min_row=fila_encabezado + 1, max_row=fila_fin)
+        grafico_desv.add_data(datos_grafico, titles_from_data=True)
+        grafico_desv.set_categories(categorias_grafico)
+        grafico_desv.width, grafico_desv.height = 18, 10
+        ws_desv.add_chart(grafico_desv, f"A{fila_fin + 3}")
+
         wb.save(EXCEL_FILE)
         st.success("✅ ¡Reporte Excel generado con éxito usando el nombre de tu cuenta!")
 
@@ -1152,6 +1444,29 @@ elif menu == "8. Reporte Final":
                 file_name="Reporte_Financiero.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
+
+    st.markdown("---")
+    st.markdown("### 📄 Reporte PDF Corporativo")
+    st.caption("Documento formal con la identidad visual del proyecto — no incluye firma digital ni certificación legal.")
+
+    if st.button("📄 Generar Reporte PDF Corporativo"):
+        nombre_institucion_pdf = st.session_state.user_data.get('institucion', 'Institución Financiera')
+        presupuestos_cat_pdf = cargar_presupuestos_categoria()
+        df_desviacion_pdf = calcular_tabla_desviaciones(st.session_state.gastos_df, presupuestos_cat_pdf)
+        buffer_pdf = generar_reporte_pdf_corporativo(
+            nombre_institucion_pdf, st.session_state.ingresos_df, st.session_state.gastos_df, df_desviacion_pdf
+        )
+        st.session_state.pdf_reporte_bytes = buffer_pdf.getvalue()
+        registrar_auditoria("Generó Reporte PDF Corporativo")
+        st.success("✅ ¡Reporte PDF generado!")
+
+    if 'pdf_reporte_bytes' in st.session_state:
+        st.download_button(
+            "📥 Descargar Reporte PDF",
+            data=st.session_state.pdf_reporte_bytes,
+            file_name="Reporte_Financiero_Corporativo.pdf",
+            mime="application/pdf"
+        )
 elif menu == "9. Auditoría del Sistema":
     # --------------------------------------------------------------------------------
     # REQUISITO 2 (vista): ya no depende de una contraseña hardcodeada. El acceso está
@@ -1185,3 +1500,136 @@ elif menu == "9. Auditoría del Sistema":
             st.warning(f"No se pudieron cargar los registros de auditoría: {e}")
     else:
         st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
+
+elif menu == "10. Facturas (OCR) y Anomalías":
+    st.markdown('<p class="main-header">🧾 Facturas (OCR) y Detección de Anomalías</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Sube una factura — la IA extrae los datos y las reglas del sistema deciden si se registra directo o queda pendiente de revisión.</p>', unsafe_allow_html=True)
+    st.markdown("---")
+
+    gemini_api_key = st.secrets.get("gemini", {}).get("api_key") if "gemini" in st.secrets else None
+
+    if not gemini_api_key:
+        st.warning("⚠️ Falta configurar la clave de Gemini en los secrets del proyecto (sección [gemini]) — es la misma que usa el Asistente IA de la barra lateral.")
+    else:
+        archivo_factura = st.file_uploader("Sube la foto o PDF de la factura", type=["png", "jpg", "jpeg", "pdf"], key="upload_factura_ocr")
+
+        if archivo_factura is not None:
+            if st.button("🔎 Extraer datos con IA"):
+                mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "pdf": "application/pdf"}
+                extension = archivo_factura.name.split(".")[-1].lower()
+                datos_extraidos = extraer_datos_factura_gemini(
+                    archivo_factura.getvalue(), mime_map.get(extension, "image/jpeg"), gemini_api_key
+                )
+                if datos_extraidos:
+                    st.session_state.factura_extraida = datos_extraidos
+                    st.success("✅ Datos extraídos. Revísalos y corrígelos si algo no quedó bien antes de procesar.")
+
+        if "factura_extraida" in st.session_state:
+            st.markdown("#### ✏️ Confirma o corrige los datos antes de procesar")
+            datos = st.session_state.factura_extraida
+            c1, c2 = st.columns(2)
+            with c1:
+                concepto_confirmado = st.text_input("Concepto", value=str(datos.get("concepto", "")))
+                try:
+                    valor_default = float(datos.get("valor") or 0)
+                except (TypeError, ValueError):
+                    valor_default = 0.0
+                valor_confirmado = st.number_input("Valor ($)", min_value=0.0, value=valor_default, step=1000.0)
+            with c2:
+                fecha_texto = datos.get("fecha")
+                try:
+                    fecha_default = datetime.datetime.strptime(fecha_texto, "%Y-%m-%d").date() if fecha_texto else datetime.date.today()
+                except (ValueError, TypeError):
+                    fecha_default = datetime.date.today()
+                fecha_confirmada = st.date_input("Fecha", value=fecha_default)
+                categoria_sugerida = datos.get("categoria_sugerida") if datos.get("categoria_sugerida") in CATEGORIAS_GASTO else "Varios"
+                categoria_confirmada = st.selectbox("Categoría", CATEGORIAS_GASTO, index=CATEGORIAS_GASTO.index(categoria_sugerida))
+            responsable_confirmado = st.selectbox("Responsable", INTEGRANTES_LISTA)
+
+            if st.button("✅ Procesar factura"):
+                presupuestos_cat_actuales = cargar_presupuestos_categoria()
+                motivos = detectar_anomalias_gasto(
+                    valor_confirmado, fecha_confirmada.strftime("%Y-%m-%d"), concepto_confirmado, categoria_confirmada,
+                    st.session_state.gastos_df, presupuesto_tope, presupuestos_cat_actuales
+                )
+
+                if not motivos:
+                    reg_id = f"GAS-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    nuevo_reg = {
+                        "ID": reg_id, "Fecha": fecha_confirmada.strftime("%Y-%m-%d"),
+                        "Concepto": concepto_confirmado, "Categoría": categoria_confirmada,
+                        "Valor": float(valor_confirmado), "Responsable": responsable_confirmado,
+                    }
+                    st.session_state.gastos_df = pd.concat([st.session_state.gastos_df, pd.DataFrame([nuevo_reg])], ignore_index=True)
+                    guardar_registro_nube('gastos', nuevo_reg)
+                    registrar_auditoria("Registró Gasto (factura OCR, sin anomalías)", f"{concepto_confirmado} - ${valor_confirmado:,.0f}")
+                    st.success("✅ Sin anomalías detectadas — el gasto se registró directamente.")
+                else:
+                    institucion_id = get_institucion_id()
+                    pendiente_id = f"PEND-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    registro_pendiente = {
+                        "ID": pendiente_id, "Fecha": fecha_confirmada.strftime("%Y-%m-%d"),
+                        "Concepto": concepto_confirmado, "Categoría": categoria_confirmada,
+                        "Valor": float(valor_confirmado), "Responsable": responsable_confirmado,
+                        "Motivos": motivos, "Estado": "Pendiente",
+                        "Numero_Factura": datos.get("numero_factura"),
+                    }
+                    if db and institucion_id:
+                        db.collection("usuarios").document(institucion_id).collection("gastos_pendientes").document(pendiente_id).set(registro_pendiente)
+                    registrar_auditoria("Factura bloqueada para revisión", f"{concepto_confirmado} - ${valor_confirmado:,.0f} — Motivos: {'; '.join(motivos)}")
+                    st.warning("🚫 Se detectaron anomalías — el gasto quedó pendiente de revisión humana (no se contabilizó todavía).")
+                    for motivo in motivos:
+                        st.caption(f"• {motivo}")
+
+                del st.session_state.factura_extraida
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 🚦 Gastos Pendientes de Revisión")
+
+    if db:
+        institucion_id = get_institucion_id()
+        try:
+            pendientes_ref = (
+                db.collection("usuarios").document(institucion_id).collection("gastos_pendientes")
+                .where("Estado", "==", "Pendiente").stream()
+            )
+            pendientes_lista = [p.to_dict() for p in pendientes_ref]
+
+            if not pendientes_lista:
+                st.info("No hay gastos pendientes de revisión en este momento.")
+            else:
+                for pendiente in pendientes_lista:
+                    with st.expander(f"🚫 {pendiente['Concepto']} — ${float(pendiente['Valor']):,.0f} ({pendiente['Fecha']})"):
+                        st.write(f"**Categoría:** {pendiente['Categoría']}  |  **Responsable:** {pendiente['Responsable']}")
+                        if pendiente.get("Numero_Factura"):
+                            st.write(f"**N.° de factura:** {pendiente['Numero_Factura']}")
+                        st.markdown("**Motivos de la alerta:**")
+                        for motivo in pendiente.get("Motivos", []):
+                            st.caption(f"• {motivo}")
+
+                        col_aprobar, col_rechazar = st.columns(2)
+                        with col_aprobar:
+                            if st.button("✅ Aprobar y registrar", key=f"aprobar_{pendiente['ID']}"):
+                                reg_id = f"GAS-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                nuevo_reg = {
+                                    "ID": reg_id, "Fecha": pendiente["Fecha"], "Concepto": pendiente["Concepto"],
+                                    "Categoría": pendiente["Categoría"], "Valor": float(pendiente["Valor"]),
+                                    "Responsable": pendiente["Responsable"],
+                                }
+                                guardar_registro_nube('gastos', nuevo_reg)
+                                db.collection("usuarios").document(institucion_id).collection("gastos_pendientes").document(pendiente["ID"]).update({"Estado": "Aprobado"})
+                                registrar_auditoria("Aprobó Gasto Pendiente", f"{pendiente['Concepto']} - ${float(pendiente['Valor']):,.0f}")
+                                st.success("Gasto aprobado y registrado.")
+                                cargar_datos_nube()
+                                st.rerun()
+                        with col_rechazar:
+                            if st.button("❌ Rechazar", key=f"rechazar_{pendiente['ID']}"):
+                                db.collection("usuarios").document(institucion_id).collection("gastos_pendientes").document(pendiente["ID"]).update({"Estado": "Rechazado"})
+                                registrar_auditoria("Rechazó Gasto Pendiente", f"{pendiente['Concepto']} - ${float(pendiente['Valor']):,.0f}")
+                                st.info("Gasto rechazado — queda en el historial como referencia, sin contabilizarse.")
+                                st.rerun()
+        except Exception as e:
+            st.warning(f"No se pudieron cargar los gastos pendientes: {e}")
+    else:
+        st.warning("Conecta Firebase para habilitar esta sección.")
