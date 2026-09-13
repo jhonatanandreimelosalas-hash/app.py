@@ -1248,7 +1248,7 @@ elif menu == "7. Gestión de Archivos":
                     "tipo": archivo_subido.type,
                     "archivo_b64": base64_archivo,
                     "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
-                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
                 }
                 db.collection("usuarios").document(institucion_id).collection("archivos").document(nombre_id).set(doc_data)
