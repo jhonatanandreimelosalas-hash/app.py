@@ -72,7 +72,14 @@ def render_estilos(modo_oscuro: bool) -> str:
 
 st.markdown(render_estilos(st.session_state.modo_oscuro), unsafe_allow_html=True)
 
-st.sidebar.toggle("🌙 Modo oscuro", key="modo_oscuro")
+if st.sidebar.toggle("🌙 Modo oscuro", key="modo_oscuro_toggle", value=st.session_state.get('modo_oscuro', False)):
+    if not st.session_state.modo_oscuro:
+        st.session_state.modo_oscuro = True
+        st.rerun()
+else:
+    if st.session_state.modo_oscuro:
+        st.session_state.modo_oscuro = False
+        st.rerun()
 
 # --- INICIALIZACIÓN DE FIREBASE ---
 FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com'
