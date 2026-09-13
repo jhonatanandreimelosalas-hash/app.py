@@ -35,8 +35,6 @@ if 'modo_oscuro' not in st.session_state:
 
 
 def render_estilos(modo_oscuro: bool) -> str:
-    """Devuelve el bloque <style> según el modo activo. Paleta sobria institucional
-    en ambos casos; solo cambian fondo, superficies y contraste de texto."""
     if modo_oscuro:
         fondo_app = "#0F172A"
         superficie = "#1E293B"
@@ -45,14 +43,16 @@ def render_estilos(modo_oscuro: bool) -> str:
         texto_secundario = "#94A3B8"
         acento = "#3B82F6"
         acento_hover = "#60A5FA"
+        input_bg = "#0F172A"
     else:
         fondo_app = "#FFFFFF"
         superficie = "#F8FAFC"
         borde = "#E2E8F0"
-        texto_principal = "#1E293B"
+        texto_principal = "#1E3A8A"
         texto_secundario = "#4B5563"
         acento = "#1E3A8A"
         acento_hover = "#2563EB"
+        input_bg = "#FFFFFF"
 
     return f"""
     <style>
@@ -62,10 +62,12 @@ def render_estilos(modo_oscuro: bool) -> str:
         .stButton>button {{ width: 100%; border-radius: 8px; font-weight: 600; background-color: {acento}; color: white; transition: 0.3s; border: none; }}
         .stButton>button:hover {{ background-color: {acento_hover}; border-color: {acento_hover}; }}
         div.stMetric {{ background-color: {superficie}; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15); border: 1px solid {borde}; }}
-        .file-card {{ border: 1px solid {borde}; border-radius: 10px; padding: 10px; text-align: center; background-color: {superficie}; margin-bottom: 15px; }}
         section[data-testid="stSidebar"] {{ background-color: {superficie}; }}
-        .stDataFrame, .stTable {{ background-color: {superficie}; }}
         p, span, label, .stMarkdown {{ color: {texto_principal}; }}
+        
+        /* Forzar colores en inputs y selects para que no desentonen */
+        input, textarea, select {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
+        div[data-baseweb="select"] > div {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
     </style>
     """
 
