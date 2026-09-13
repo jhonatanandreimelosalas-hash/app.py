@@ -35,6 +35,8 @@ if 'modo_oscuro' not in st.session_state:
 
 
 def render_estilos(modo_oscuro: bool) -> str:
+    """Devuelve el bloque <style> con selectores específicos de Streamlit
+    para garantizar contraste en modo oscuro y claro."""
     if modo_oscuro:
         fondo_app = "#0F172A"
         superficie = "#1E293B"
@@ -48,7 +50,7 @@ def render_estilos(modo_oscuro: bool) -> str:
         fondo_app = "#FFFFFF"
         superficie = "#F8FAFC"
         borde = "#E2E8F0"
-        texto_principal = "#1E3A8A"
+        texto_principal = "#1E293B"
         texto_secundario = "#4B5563"
         acento = "#1E3A8A"
         acento_hover = "#2563EB"
@@ -63,14 +65,21 @@ def render_estilos(modo_oscuro: bool) -> str:
         .stButton>button:hover {{ background-color: {acento_hover}; border-color: {acento_hover}; }}
         div.stMetric {{ background-color: {superficie}; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15); border: 1px solid {borde}; }}
         section[data-testid="stSidebar"] {{ background-color: {superficie}; }}
-        p, span, label, .stMarkdown {{ color: {texto_principal}; }}
         
-        /* Forzar colores en inputs y selects para que no desentonen */
+        /* Forzar visibilidad de textos generales, markdown y elementos de la barra lateral */
+        p, span, label, .stMarkdown, div[data-testid="stSidebar"] {{ color: {texto_principal} !important; }}
+        
+        /* Corregir contenedores, expanders y áreas de chat/IA para que no oculten las letras */
+        div[data-testid="stExpander"], div[data-testid="stVerticalBlock"] {{ color: {texto_principal}; }}
+        
+        /* Forzar colores en campos de entrada, áreas de texto y selectores */
         input, textarea, select {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
         div[data-baseweb="select"] > div {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
+        
+        /* Corregir el texto dentro de los inputs de Streamlit */
+        input::-webkit-input-placeholder {{ color: {texto_secundario} !important; }}
     </style>
     """
-
 
 st.markdown(render_estilos(st.session_state.modo_oscuro), unsafe_allow_html=True)
 
