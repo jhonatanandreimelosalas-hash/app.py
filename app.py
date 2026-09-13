@@ -1202,8 +1202,8 @@ elif menu == "6. Anexo de Recibos & QR":
         tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
         saldo = tot_ing - tot_gas
         rec_id = f"GEN-{datetime.now().strftime('%Y%m%d%H%M')}"
-        fecha_actual = datetime.now().strftime('%Y-%m-%d')
-
+        rec_id = f"GEN-{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
+        
         texto_recibo = f"COMPROBANTE {rec_id}\nInstitucion: Colegio Francisco de Paula Santander\nIngresos: ${tot_ing:,.0f}\nGastos: ${tot_gas:,.0f}\nSaldo: ${saldo:,.0f}"
         qr = qrcode.QRCode(box_size=10, border=2)
         qr.add_data(texto_recibo)
