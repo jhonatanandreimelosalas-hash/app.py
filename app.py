@@ -1210,7 +1210,8 @@ elif menu == "6. Anexo de Recibos & QR":
         qr.make(fit=True)
         qr_img_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        rec_id = f"GEN-{datetime.datetime.now().strftime('%Y%m%d%H%M')}"fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d")
+        rec_id = f"GEN-{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
+        fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d")
         buffer_recibo = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, qr_img_pil)
         st.session_state.rec_img_bytes = buffer_recibo.getvalue()
         st.success("✅ ¡Comprobante generado exitosamente!")
