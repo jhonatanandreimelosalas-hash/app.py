@@ -1148,7 +1148,7 @@ elif menu == "5. Dashboard y Gráficos":
 
     presupuestos_categoria = cargar_presupuestos_categoria()
 
-    "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),y:
+    if not st.session_state.gastos_df.empty:
         df_gastos_cat = st.session_state.gastos_df.copy()
         df_gastos_cat["Valor"] = pd.to_numeric(df_gastos_cat["Valor"], errors='coerce').fillna(0)
         df_desviacion = calcular_tabla_desviaciones(st.session_state.gastos_df, presupuestos_categoria)
@@ -1240,7 +1240,7 @@ elif menu == "7. Gestión de Archivos":
                 bytes_archivo = archivo_subido.getvalue()
                 base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
 
-                nombre_id = f"ARCH-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                nombre_id = f"ARCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
                 institucion_id = get_institucion_id()
                 doc_data = {
                     "ID": nombre_id,
@@ -1248,7 +1248,7 @@ elif menu == "7. Gestión de Archivos":
                     "tipo": archivo_subido.type,
                     "archivo_b64": base64_archivo,
                     "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
-                    "fecha": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "nombre_id = f"ARCH-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}",
                     "subido_por": st.session_state.user_data['institucion']
                 }
                 db.collection("usuarios").document(institucion_id).collection("archivos").document(nombre_id).set(doc_data)
