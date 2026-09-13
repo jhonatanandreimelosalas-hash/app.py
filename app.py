@@ -1148,7 +1148,7 @@ elif menu == "5. Dashboard y Gráficos":
 
     presupuestos_categoria = cargar_presupuestos_categoria()
 
-    if not st.session_state.gastos_df.empty:
+    "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),y:
         df_gastos_cat = st.session_state.gastos_df.copy()
         df_gastos_cat["Valor"] = pd.to_numeric(df_gastos_cat["Valor"], errors='coerce').fillna(0)
         df_desviacion = calcular_tabla_desviaciones(st.session_state.gastos_df, presupuestos_categoria)
