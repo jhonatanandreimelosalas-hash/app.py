@@ -1240,7 +1240,7 @@ elif menu == "7. Gestión de Archivos":
                 bytes_archivo = archivo_subido.getvalue()
                 base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
 
-                nombre_id = f"ARCH-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+                nombre_id = f"ARCH-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
                 institucion_id = get_institucion_id()
                 doc_data = {
                     "ID": nombre_id,
