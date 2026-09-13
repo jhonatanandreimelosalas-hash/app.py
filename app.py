@@ -431,20 +431,11 @@ if not st.session_state.logged_in:
         # --- Botón de Google (Requisito 3) ---
         if GOOGLE_OAUTH_DISPONIBLE:
             url_google = construir_url_login_google()
-            st.markdown(
-                f"""
-                <a href="{url_google}" target="_self" style="text-decoration:none;">
-                    <div style="display:flex; align-items:center; justify-content:center;
-                                gap:10px; border:1px solid #E2E8F0; border-radius:8px;
-                                padding:10px; background-color:white; cursor:pointer;
-                                margin-bottom:15px; font-weight:600; color:#334155;">
-                        <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" width="18" height="18">
-                        Iniciar sesión con Google
-                    </div>
-                </a>
-                """,
-                unsafe_allow_html=True,
-            )
+            # st.link_button es el widget nativo de Streamlit para navegación externa.
+            # Un <a href> metido a mano vía st.markdown puede quedar interceptado por el
+            # manejo de clics propio de Streamlit (clic izquierdo normal no navega, aunque
+            # "abrir en pestaña nueva" sí funciona) — este widget evita ese problema.
+            st.link_button("🔵 Iniciar sesión con Google", url_google, use_container_width=True)
             st.markdown("<p style='text-align:center; color:#94A3B8; font-size:0.85rem;'>— o con tu correo y contraseña —</p>", unsafe_allow_html=True)
         else:
             st.caption("ℹ️ El login con Google no está configurado aún (faltan secrets [google_oauth]). Usa correo y contraseña.")
