@@ -36,7 +36,25 @@ if 'modo_oscuro' not in st.session_state:
 
 def render_estilos(modo_oscuro: bool) -> str:
     """Devuelve el bloque <style> con selectores específicos de Streamlit
-    para garantizar contraste en modo oscuro y claro."""
+    para garantizar contraste en modo oscuro y claro.
+
+    DIAGNÓSTICO DEL BUG REPORTADO ("se ve feo si el navegador está en modo claro"):
+    Streamlit dibuja su propia barra superior (el header con el menú ☰ y el botón
+    "Deploy") como un elemento aparte de `.stApp` — vive en [data-testid="stHeader"].
+    Antes solo coloreábamos `.stApp`, así que esa barra se quedaba con el color que
+    trae Streamlit por defecto (generalmente blanco) sin importar nuestro toggle,
+    y al activar el modo oscuro quedaba una franja clara pegada encima de un cuerpo
+    oscuro — de ahí lo "feo". La solución es pintar también esa barra y el resto de
+    contenedores estructurales de Streamlit (toolbar, línea decorativa superior,
+    contenedor de vista principal), no solo el cuerpo de la app.
+
+    LÍMITE HONESTO: el `st.dataframe` nativo de Streamlit se dibuja con un
+    componente de canvas (no HTML plano) que toma sus colores del tema interno de
+    Streamlit, no de este CSS. Puede que las tablas se vean con fondo claro incluso
+    en modo oscuro — eso no se puede forzar con CSS puro; requeriría fijar el tema
+    real de Streamlit (archivo .streamlit/config.toml), que es estático y no se
+    puede alternar en vivo con un switch como este.
+    """
     if modo_oscuro:
         fondo_app = "#0F172A"
         superficie = "#1E293B"
@@ -46,6 +64,7 @@ def render_estilos(modo_oscuro: bool) -> str:
         acento = "#3B82F6"
         acento_hover = "#60A5FA"
         input_bg = "#0F172A"
+        color_scheme = "dark"
     else:
         fondo_app = "#FFFFFF"
         superficie = "#F8FAFC"
@@ -55,27 +74,42 @@ def render_estilos(modo_oscuro: bool) -> str:
         acento = "#1E3A8A"
         acento_hover = "#2563EB"
         input_bg = "#FFFFFF"
+        color_scheme = "light"
 
     return f"""
     <style>
+        :root {{ color-scheme: {color_scheme}; }}
+
+        /* Cuerpo de la app */
         .stApp {{ background-color: {fondo_app}; color: {texto_principal}; }}
+
+        /* Header/toolbar nativos de Streamlit — antes quedaban sin colorear y
+           creaban la franja clara/oscura desalineada que reportaste */
+        [data-testid="stHeader"] {{ background-color: {fondo_app} !important; }}
+        [data-testid="stToolbar"] {{ background-color: {fondo_app} !important; }}
+        [data-testid="stDecoration"] {{ background-image: none !important; background-color: {acento} !important; }}
+        [data-testid="stAppViewContainer"] {{ background-color: {fondo_app} !important; }}
+        [data-testid="stBottomBlockContainer"] {{ background-color: {fondo_app} !important; }}
+        [data-testid="stMainBlockContainer"] {{ background-color: {fondo_app} !important; }}
+
         .main-header {{ font-size: 2.3rem; color: {acento}; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }}
         .sub-header {{ font-size: 1.1rem; color: {texto_secundario}; margin-bottom: 20px; }}
         .stButton>button {{ width: 100%; border-radius: 8px; font-weight: 600; background-color: {acento}; color: white; transition: 0.3s; border: none; }}
         .stButton>button:hover {{ background-color: {acento_hover}; border-color: {acento_hover}; }}
         div.stMetric {{ background-color: {superficie}; padding: 15px 20px; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.15); border: 1px solid {borde}; }}
         section[data-testid="stSidebar"] {{ background-color: {superficie}; }}
-        
+
         /* Forzar visibilidad de textos generales, markdown y elementos de la barra lateral */
         p, span, label, .stMarkdown, div[data-testid="stSidebar"] {{ color: {texto_principal} !important; }}
-        
+
         /* Corregir contenedores, expanders y áreas de chat/IA para que no oculten las letras */
-        div[data-testid="stExpander"], div[data-testid="stVerticalBlock"] {{ color: {texto_principal}; }}
-        
+        div[data-testid="stExpander"], div[data-testid="stVerticalBlock"] {{ color: {texto_principal}; background-color: transparent; }}
+        div[data-testid="stExpander"] summary {{ background-color: {superficie}; }}
+
         /* Forzar colores en campos de entrada, áreas de texto y selectores */
         input, textarea, select {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
         div[data-baseweb="select"] > div {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
-        
+
         /* Corregir el texto dentro de los inputs de Streamlit */
         input::-webkit-input-placeholder {{ color: {texto_secundario} !important; }}
     </style>
@@ -371,6 +405,110 @@ def detectar_anomalias_gasto(nuevo_valor, nueva_fecha, nuevo_concepto, nueva_cat
                 motivos.append(f"Monto inusualmente alto frente al promedio histórico de la categoría (${promedio_cat:,.0f}).")
 
     return motivos
+
+
+# =====================================================================================
+# OCR DE COMPROBANTES DE INGRESO + RELACIÓN INGRESOS-PRESUPUESTO
+# -------------------------------------------------------------------------------------
+# A diferencia de los gastos, un ingreso NO se compara contra el presupuesto como
+# regla de bloqueo — el presupuesto es un tope de gasto, no de ingreso, así que un
+# ingreso alto nunca debería "quedar pendiente" solo por ser alto frente al
+# presupuesto. Lo que sí tiene sentido es duplicidad (mismo depósito registrado dos
+# veces) y monto atípico frente al historial. La relación con el presupuesto se
+# muestra aparte, como contexto informativo (calcular_relacion_presupuesto), en la
+# sección 2 y junto al resultado del OCR — no como una condición que bloquea nada.
+# =====================================================================================
+
+def extraer_datos_ingreso_gemini(archivo_bytes, mime_type, api_key):
+    """Envía la imagen/PDF de un comprobante de ingreso (transferencia, consignación,
+    recibo de pago recibido) a Gemini y devuelve un diccionario con los campos
+    extraídos, o None si la extracción falla."""
+    try:
+        from google import genai
+        from google.genai import types
+        import json as json_lib
+
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Eres un asistente que extrae datos de comprobantes de ingreso escolares "
+            "(transferencias, consignaciones, recibos de pago recibido, donaciones). "
+            "Analiza la imagen o documento adjunto y responde ÚNICAMENTE con un objeto JSON "
+            "(sin texto adicional, sin explicaciones, sin backticks de markdown), con "
+            "exactamente estas claves:\n"
+            '{"concepto": "descripción breve de qué es el ingreso (ej. pago de rifa, donación, matrícula)", '
+            '"valor": numero_sin_simbolos_ni_comas_ni_texto, '
+            '"fecha": "YYYY-MM-DD si es visible en el documento, o null si no se ve", '
+            '"observaciones": "cualquier dato adicional visible (referencia, quién paga), o null"}'
+        )
+        response = client.models.generate_content(
+            model="gemini-3.6-flash",
+            contents=[
+                types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type),
+                prompt,
+            ],
+        )
+        texto_respuesta = response.text.strip().replace("```json", "").replace("```", "").strip()
+        return json_lib.loads(texto_respuesta)
+    except Exception as e:
+        st.error(f"No se pudieron extraer los datos del comprobante automáticamente: {e}")
+        return None
+
+
+def detectar_anomalias_ingreso(nuevo_valor, nueva_fecha, nuevo_concepto, ingresos_existentes_df):
+    """Reglas para ingresos: solo duplicidad y monto atípico frente al historial.
+    Intencionalmente NO incluye ninguna regla de presupuesto (ver nota arriba)."""
+    import difflib
+
+    motivos = []
+    if ingresos_existentes_df is None or ingresos_existentes_df.empty:
+        return motivos
+
+    df_temp = ingresos_existentes_df.copy()
+    df_temp["Valor"] = pd.to_numeric(df_temp["Valor"], errors='coerce').fillna(0)
+    df_temp["FechaDT"] = pd.to_datetime(df_temp["Fecha"], errors='coerce')
+    fecha_nueva_dt = pd.to_datetime(nueva_fecha, errors='coerce')
+
+    for _, fila in df_temp.iterrows():
+        mismo_valor = abs(fila["Valor"] - nuevo_valor) < 1
+        fecha_cercana = (
+            pd.notna(fila["FechaDT"]) and pd.notna(fecha_nueva_dt)
+            and abs((fila["FechaDT"] - fecha_nueva_dt).days) <= 5
+        )
+        similitud = difflib.SequenceMatcher(None, str(fila["Concepto"]).lower(), str(nuevo_concepto).lower()).ratio()
+        if mismo_valor and fecha_cercana and similitud > 0.55:
+            motivos.append(f"Posible ingreso duplicado: se parece a '{fila['Concepto']}' del {fila['Fecha']}, por el mismo valor.")
+            break
+
+    if len(df_temp) >= 3:
+        promedio = df_temp["Valor"].mean()
+        if promedio > 0 and nuevo_valor > promedio * 2.5:
+            motivos.append(f"Monto inusualmente alto frente al promedio histórico de ingresos (${promedio:,.0f}).")
+
+    return motivos
+
+
+def calcular_relacion_presupuesto(total_ingresos, total_gastos, presupuesto_tope):
+    """Muestra qué tan cerca está la situación financiera actual del presupuesto de
+    gasto asignado — contexto informativo para la sección de Ingresos, que antes
+    vivía completamente aislada del presupuesto configurado en la barra lateral."""
+    saldo = total_ingresos - total_gastos
+    if not presupuesto_tope or presupuesto_tope <= 0:
+        return {"nivel": "sin_presupuesto", "mensaje": "Aún no has asignado un presupuesto general en la barra lateral, así que no hay con qué comparar tus ingresos todavía."}
+
+    porcentaje_gastado = (total_gastos / presupuesto_tope) * 100
+    porcentaje_cubierto = (total_ingresos / presupuesto_tope) * 100
+
+    if porcentaje_gastado >= 100:
+        nivel = "critico"
+        mensaje = f"Ya superaste el presupuesto asignado (${presupuesto_tope:,.0f}). Tus ingresos actuales cubren el {porcentaje_cubierto:.0f}% de ese presupuesto — sigue registrando ingresos para cerrar la brecha."
+    elif porcentaje_gastado >= 80:
+        nivel = "alerta"
+        mensaje = f"Vas en el {porcentaje_gastado:.0f}% del presupuesto asignado (quedan ${presupuesto_tope - total_gastos:,.0f} disponibles). Tus ingresos cubren el {porcentaje_cubierto:.0f}% del total del presupuesto."
+    else:
+        nivel = "ok"
+        mensaje = f"Tus ingresos cubren el {porcentaje_cubierto:.0f}% del presupuesto asignado, y solo llevas gastado el {porcentaje_gastado:.0f}%. Vas bien."
+
+    return {"nivel": nivel, "mensaje": mensaje, "saldo": saldo}
 
 
 # =====================================================================================
@@ -1004,6 +1142,19 @@ elif menu == "2. Registro de Ingresos":
         st.dataframe(st.session_state.ingresos_df.drop(columns=['ID']), use_container_width=True)
         st.metric("💵 TOTAL INGRESOS", f"${st.session_state.ingresos_df['Valor'].astype(float).sum():,.0f} COP")
 
+        # --- Relación con el presupuesto (antes esta sección vivía aislada de él) ---
+        tot_ing_actual = st.session_state.ingresos_df["Valor"].astype(float).sum()
+        tot_gas_actual = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+        relacion = calcular_relacion_presupuesto(tot_ing_actual, tot_gas_actual, presupuesto_tope)
+        if relacion["nivel"] == "critico":
+            st.error(f"📊 {relacion['mensaje']}")
+        elif relacion["nivel"] == "alerta":
+            st.warning(f"📊 {relacion['mensaje']}")
+        elif relacion["nivel"] == "ok":
+            st.success(f"📊 {relacion['mensaje']}")
+        else:
+            st.caption(f"📊 {relacion['mensaje']}")
+
         st.markdown("### 🗑️ Eliminar Ingreso")
         opciones = [f"{row['Concepto']} - ${row['Valor']:,.0f}" for _, row in st.session_state.ingresos_df.iterrows()]
         seleccion = st.selectbox("Selecciona para eliminar:", opciones)
@@ -1605,51 +1756,159 @@ elif menu == "10. Facturas (OCR) y Anomalías":
                 st.rerun()
 
     st.markdown("---")
-    st.markdown("### 🚦 Gastos Pendientes de Revisión")
+    st.markdown("### 💵 Registrar Ingreso desde Imagen (IA)")
+    st.caption("Sube una foto o PDF del comprobante (transferencia, consignación, recibo) — la IA extrae los datos.")
+
+    if not gemini_api_key:
+        st.warning("⚠️ Falta configurar la clave de Gemini en los secrets del proyecto (sección [gemini]).")
+    else:
+        archivo_ingreso = st.file_uploader("Sube el comprobante de ingreso", type=["png", "jpg", "jpeg", "pdf"], key="upload_ingreso_ocr")
+
+        if archivo_ingreso is not None:
+            if st.button("🔎 Extraer datos del comprobante"):
+                mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "pdf": "application/pdf"}
+                extension = archivo_ingreso.name.split(".")[-1].lower()
+                datos_ingreso_extraidos = extraer_datos_ingreso_gemini(
+                    archivo_ingreso.getvalue(), mime_map.get(extension, "image/jpeg"), gemini_api_key
+                )
+                if datos_ingreso_extraidos:
+                    st.session_state.ingreso_extraido = datos_ingreso_extraidos
+                    st.success("✅ Datos extraídos. Revísalos y corrígelos si algo no quedó bien antes de procesar.")
+
+        if "ingreso_extraido" in st.session_state:
+            st.markdown("#### ✏️ Confirma o corrige los datos antes de procesar")
+            datos_ing = st.session_state.ingreso_extraido
+            ci1, ci2 = st.columns(2)
+            with ci1:
+                concepto_ing_confirmado = st.text_input("Concepto", value=str(datos_ing.get("concepto", "")), key="concepto_ing_ocr")
+                try:
+                    valor_ing_default = float(datos_ing.get("valor") or 0)
+                except (TypeError, ValueError):
+                    valor_ing_default = 0.0
+                valor_ing_confirmado = st.number_input("Valor ($)", min_value=0.0, value=valor_ing_default, step=1000.0, key="valor_ing_ocr")
+            with ci2:
+                fecha_ing_texto = datos_ing.get("fecha")
+                try:
+                    fecha_ing_default = datetime.datetime.strptime(fecha_ing_texto, "%Y-%m-%d").date() if fecha_ing_texto else datetime.date.today()
+                except (ValueError, TypeError):
+                    fecha_ing_default = datetime.date.today()
+                fecha_ing_confirmada = st.date_input("Fecha", value=fecha_ing_default, key="fecha_ing_ocr")
+                responsable_ing_confirmado = st.selectbox("Responsable", INTEGRANTES_LISTA, key="responsable_ing_ocr")
+            observaciones_ing_confirmadas = st.text_input("Observaciones", value=str(datos_ing.get("observaciones") or ""), key="obs_ing_ocr")
+
+            if st.button("✅ Procesar ingreso"):
+                motivos_ing = detectar_anomalias_ingreso(
+                    valor_ing_confirmado, fecha_ing_confirmada.strftime("%Y-%m-%d"), concepto_ing_confirmado, st.session_state.ingresos_df
+                )
+
+                # Contexto informativo (no bloquea nada) — la relación con el presupuesto
+                tot_gas_ctx = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
+                tot_ing_ctx = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
+                relacion_ctx = calcular_relacion_presupuesto(tot_ing_ctx + valor_ing_confirmado, tot_gas_ctx, presupuesto_tope)
+                st.caption(f"📊 {relacion_ctx['mensaje']}")
+
+                if not motivos_ing:
+                    reg_id = f"ING-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    nuevo_reg_ing = {
+                        "ID": reg_id, "Fecha": fecha_ing_confirmada.strftime("%Y-%m-%d"),
+                        "Concepto": concepto_ing_confirmado, "Valor": float(valor_ing_confirmado),
+                        "Responsable": responsable_ing_confirmado, "Observaciones": observaciones_ing_confirmadas,
+                    }
+                    st.session_state.ingresos_df = pd.concat([st.session_state.ingresos_df, pd.DataFrame([nuevo_reg_ing])], ignore_index=True)
+                    guardar_registro_nube('ingresos', nuevo_reg_ing)
+                    registrar_auditoria("Registró Ingreso (comprobante OCR, sin anomalías)", f"{concepto_ing_confirmado} - ${valor_ing_confirmado:,.0f}")
+                    st.success("✅ Sin anomalías detectadas — el ingreso se registró directamente.")
+                else:
+                    institucion_id = get_institucion_id()
+                    pendiente_ing_id = f"PEND-ING-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                    registro_pendiente_ing = {
+                        "ID": pendiente_ing_id, "Fecha": fecha_ing_confirmada.strftime("%Y-%m-%d"),
+                        "Concepto": concepto_ing_confirmado, "Valor": float(valor_ing_confirmado),
+                        "Responsable": responsable_ing_confirmado, "Observaciones": observaciones_ing_confirmadas,
+                        "Motivos": motivos_ing, "Estado": "Pendiente",
+                    }
+                    if db and institucion_id:
+                        db.collection("usuarios").document(institucion_id).collection("ingresos_pendientes").document(pendiente_ing_id).set(registro_pendiente_ing)
+                    registrar_auditoria("Ingreso bloqueado para revisión", f"{concepto_ing_confirmado} - ${valor_ing_confirmado:,.0f} — Motivos: {'; '.join(motivos_ing)}")
+                    st.warning("🚫 Se detectaron anomalías — el ingreso quedó pendiente de revisión humana (no se contabilizó todavía).")
+                    for motivo in motivos_ing:
+                        st.caption(f"• {motivo}")
+
+                del st.session_state.ingreso_extraido
+                st.rerun()
+
+    st.markdown("---")
+    st.markdown("### 🚦 Ingresos y Gastos Pendientes de Revisión")
 
     if db:
         institucion_id = get_institucion_id()
         try:
-            pendientes_ref = (
+            gastos_pend_ref = (
                 db.collection("usuarios").document(institucion_id).collection("gastos_pendientes")
                 .where("Estado", "==", "Pendiente").stream()
             )
-            pendientes_lista = [p.to_dict() for p in pendientes_ref]
+            gastos_pend_lista = [{**p.to_dict(), "Tipo": "Gasto"} for p in gastos_pend_ref]
+
+            ingresos_pend_ref = (
+                db.collection("usuarios").document(institucion_id).collection("ingresos_pendientes")
+                .where("Estado", "==", "Pendiente").stream()
+            )
+            ingresos_pend_lista = [{**p.to_dict(), "Tipo": "Ingreso"} for p in ingresos_pend_ref]
+
+            pendientes_lista = gastos_pend_lista + ingresos_pend_lista
 
             if not pendientes_lista:
-                st.info("No hay gastos pendientes de revisión en este momento.")
+                st.info("No hay ingresos ni gastos pendientes de revisión en este momento.")
             else:
                 for pendiente in pendientes_lista:
-                    with st.expander(f"🚫 {pendiente['Concepto']} — ${float(pendiente['Valor']):,.0f} ({pendiente['Fecha']})"):
-                        st.write(f"**Categoría:** {pendiente['Categoría']}  |  **Responsable:** {pendiente['Responsable']}")
-                        if pendiente.get("Numero_Factura"):
-                            st.write(f"**N.° de factura:** {pendiente['Numero_Factura']}")
+                    es_gasto = pendiente["Tipo"] == "Gasto"
+                    icono_tipo = "🔴 Gasto" if es_gasto else "🟢 Ingreso"
+                    with st.expander(f"{icono_tipo} — {pendiente['Concepto']} — ${float(pendiente['Valor']):,.0f} ({pendiente['Fecha']})"):
+                        if es_gasto:
+                            st.write(f"**Categoría:** {pendiente['Categoría']}  |  **Responsable:** {pendiente['Responsable']}")
+                            if pendiente.get("Numero_Factura"):
+                                st.write(f"**N.° de factura:** {pendiente['Numero_Factura']}")
+                        else:
+                            st.write(f"**Responsable:** {pendiente['Responsable']}")
+                            if pendiente.get("Observaciones"):
+                                st.write(f"**Observaciones:** {pendiente['Observaciones']}")
                         st.markdown("**Motivos de la alerta:**")
                         for motivo in pendiente.get("Motivos", []):
                             st.caption(f"• {motivo}")
 
                         col_aprobar, col_rechazar = st.columns(2)
+                        coleccion_pend = "gastos_pendientes" if es_gasto else "ingresos_pendientes"
+                        coleccion_final = "gastos" if es_gasto else "ingresos"
+                        prefijo_id = "GAS" if es_gasto else "ING"
+
                         with col_aprobar:
                             if st.button("✅ Aprobar y registrar", key=f"aprobar_{pendiente['ID']}"):
-                                reg_id = f"GAS-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
-                                nuevo_reg = {
-                                    "ID": reg_id, "Fecha": pendiente["Fecha"], "Concepto": pendiente["Concepto"],
-                                    "Categoría": pendiente["Categoría"], "Valor": float(pendiente["Valor"]),
-                                    "Responsable": pendiente["Responsable"],
-                                }
-                                guardar_registro_nube('gastos', nuevo_reg)
-                                db.collection("usuarios").document(institucion_id).collection("gastos_pendientes").document(pendiente["ID"]).update({"Estado": "Aprobado"})
-                                registrar_auditoria("Aprobó Gasto Pendiente", f"{pendiente['Concepto']} - ${float(pendiente['Valor']):,.0f}")
-                                st.success("Gasto aprobado y registrado.")
+                                reg_id = f"{prefijo_id}-{datetime.datetime.now().strftime('%Y%m%d%H%M%S')}"
+                                if es_gasto:
+                                    nuevo_reg = {
+                                        "ID": reg_id, "Fecha": pendiente["Fecha"], "Concepto": pendiente["Concepto"],
+                                        "Categoría": pendiente["Categoría"], "Valor": float(pendiente["Valor"]),
+                                        "Responsable": pendiente["Responsable"],
+                                    }
+                                else:
+                                    nuevo_reg = {
+                                        "ID": reg_id, "Fecha": pendiente["Fecha"], "Concepto": pendiente["Concepto"],
+                                        "Valor": float(pendiente["Valor"]), "Responsable": pendiente["Responsable"],
+                                        "Observaciones": pendiente.get("Observaciones", ""),
+                                    }
+                                guardar_registro_nube(coleccion_final, nuevo_reg)
+                                db.collection("usuarios").document(institucion_id).collection(coleccion_pend).document(pendiente["ID"]).update({"Estado": "Aprobado"})
+                                registrar_auditoria(f"Aprobó {pendiente['Tipo']} Pendiente", f"{pendiente['Concepto']} - ${float(pendiente['Valor']):,.0f}")
+                                st.success(f"{pendiente['Tipo']} aprobado y registrado.")
                                 cargar_datos_nube()
                                 st.rerun()
                         with col_rechazar:
                             if st.button("❌ Rechazar", key=f"rechazar_{pendiente['ID']}"):
-                                db.collection("usuarios").document(institucion_id).collection("gastos_pendientes").document(pendiente["ID"]).update({"Estado": "Rechazado"})
-                                registrar_auditoria("Rechazó Gasto Pendiente", f"{pendiente['Concepto']} - ${float(pendiente['Valor']):,.0f}")
-                                st.info("Gasto rechazado — queda en el historial como referencia, sin contabilizarse.")
+                                db.collection("usuarios").document(institucion_id).collection(coleccion_pend).document(pendiente["ID"]).update({"Estado": "Rechazado"})
+                                registrar_auditoria(f"Rechazó {pendiente['Tipo']} Pendiente", f"{pendiente['Concepto']} - ${float(pendiente['Valor']):,.0f}")
+                                st.info(f"{pendiente['Tipo']} rechazado — queda en el historial como referencia, sin contabilizarse.")
                                 st.rerun()
         except Exception as e:
-            st.warning(f"No se pudieron cargar los gastos pendientes: {e}")
+            st.warning(f"No se pudieron cargar los pendientes: {e}")
     else:
         st.warning("Conecta Firebase para habilitar esta sección.")
