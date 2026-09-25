@@ -162,7 +162,10 @@ else:
 
 # --- INICIALIZACIÓN DE FIREBASE ---
 firebase_secrets = st.secrets.get("firebase", {}) if "firebase" in st.secrets else {}
-FIREBASE_STORAGE_BUCKET = (firebase_secrets.get("storage_bucket") or os.environ.get("FIREBASE_STORAGE_BUCKET") or "proyecto-app-ffdb5.appspot.com")
+FIREBASE_STORAGE_BUCKET = (
+    firebase_secrets.get("storage_bucket")
+    or os.environ.get("FIREBASE_STORAGE_BUCKET")
+)
 
 if not firebase_admin._apps:
     try:
@@ -177,14 +180,26 @@ if not firebase_admin._apps:
             st.error("⚠️ No se encontraron credenciales de Firebase.")
             st.stop()
 
-        firebase_admin.initialize_app(cred, {
-            'storageBucket': FIREBASE_STORAGE_BUCKET
-        })
+        # Usa un valor explícito de configuración si existe. Si no, deriva el
+        # bucket moderno desde el project_id del service account. Para proyectos
+        # con bucket legacy o personalizado, define firebase.storage_bucket.
+        if not FIREBASE_STORAGE_BUCKET:
+            project_id = getattr(cred, "project_id", None)
+            if project_id:
+                FIREBASE_STORAGE_BUCKET = f"{project_id}.firebasestorage.app"
+
+        firebase_options = {}
+        if FIREBASE_STORAGE_BUCKET:
+            firebase_options["storageBucket"] = FIREBASE_STORAGE_BUCKET
+        firebase_admin.initialize_app(cred, firebase_options)
     except Exception as e:
         st.error(f"⚠️ Error al conectar con Firebase: {e}")
 
 db = firestore.client() if firebase_admin._apps else None
-bucket = storage.bucket() if firebase_admin._apps else None
+bucket = (
+    storage.bucket(FIREBASE_STORAGE_BUCKET)
+    if firebase_admin._apps and FIREBASE_STORAGE_BUCKET else None
+)
 
 # --- DATOS GLOBALES ---
 EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
@@ -446,7 +461,9 @@ def prefijo_storage_empresa():
 
 def subir_evidencia_comprobante(datos_bytes, nombre_archivo, mime_type):
     if not bucket:
-        raise RuntimeError("Cloud Storage no está configurado.")
+        raise RuntimeError(
+            "Cloud Storage no está configurado. Define firebase.storage_bucket con el nombre exacto del bucket que aparece en Firebase Console > Storage."
+        )
     prefijo = prefijo_storage_empresa()
     if not prefijo:
         raise RuntimeError("No se pudo identificar la empresa para guardar el comprobante.")
@@ -2399,7 +2416,17 @@ elif menu == "10. Facturas (OCR) y Anomalías":
                                 st.success(f"{tipo_confirmado} enviado a revisión. No se suma al balance hasta ser aprobado.")
                                 st.rerun()
                             except Exception as e:
-                                st.error(f"No se pudo enviar el comprobante a revisión: {e}")
+                                detalle_error = str(e)
+                                if "does not exist" in detalle_error.lower() or "notfound" in detalle_error.lower():
+                                    bucket_nombre = getattr(bucket, "name", FIREBASE_STORAGE_BUCKET or "sin configurar")
+                                    st.error(
+                                        f"El bucket de Firebase Storage '{bucket_nombre}' no existe. "
+                                        "En Firebase Console > Storage > Files copia el nombre exacto y configúralo "
+                                        "en Streamlit secrets como [firebase] storage_bucket = \"nombre-real-del-bucket\". "
+                                        "Si aún no tienes bucket, créalo primero en Storage."
+                                    )
+                                else:
+                                    st.error(f"No se pudo enviar el comprobante a revisión: {detalle_error}")
 
     st.markdown("---")
     st.markdown("### Ingresos y gastos pendientes de revisión")
