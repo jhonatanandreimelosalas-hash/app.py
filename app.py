@@ -1312,7 +1312,28 @@ if not st.session_state.logged_in:
             # Un <a href> metido a mano vía st.markdown puede quedar interceptado por el
             # manejo de clics propio de Streamlit (clic izquierdo normal no navega, aunque
             # "abrir en pestaña nueva" sí funciona) — este widget evita ese problema.
-            st.link_button("🔵 Iniciar sesión con Google", url_google, use_container_width=True)
+            google_logo_svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">'
+                '<path fill="#4285F4" d="M43.6 20.1H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8v8c11 0 20-9 20-20 0-1.3-.1-2.6-.4-3.9z"/>'
+                '<path fill="#34A853" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.1 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z"/>'
+                '<path fill="#FBBC05" d="M12.7 28.1l-6.5 5C4.8 30.3 4 27.3 4 24s.8-6.3 2.2-9.1l6.5 5C12.3 21.3 12 22.6 12 24s.3 2.7.7 4.1z"/>'
+                '<path fill="#EA4335" d="M24 12c2.7 0 5.1.9 7.1 2.7l6.2-6.2C33.9 5 29.2 3 24 3 16.2 3 9.6 7.4 6.2 14.9l6.5 5C14.4 15.3 18.8 12 24 12z"/>'
+                '</svg>'
+            )
+            google_logo_data_uri = "data:image/svg+xml," + quote(google_logo_svg, safe="")
+            st.markdown(
+                f"""<style>
+                [data-testid="stLinkButton"] a {{
+                    display: flex !important; align-items: center; justify-content: center; gap: 0.6rem;
+                }}
+                [data-testid="stLinkButton"] a::before {{
+                    content: ""; display: inline-block; width: 20px; height: 20px; flex: 0 0 20px;
+                    background: url('{google_logo_data_uri}') center / contain no-repeat;
+                }}
+                </style>""",
+                unsafe_allow_html=True,
+            )
+            st.link_button("Iniciar sesión con Google", url_google, use_container_width=True)
             st.markdown("<p style='text-align:center; color:#94A3B8; font-size:0.85rem;'>— o con tu correo y contraseña —</p>", unsafe_allow_html=True)
         else:
             st.caption("ℹ️ El login con Google no está configurado aún (faltan secrets [google_oauth]). Usa correo y contraseña.")
