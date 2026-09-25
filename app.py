@@ -1292,6 +1292,87 @@ def generar_reporte_pdf_corporativo(nombre_institucion, df_ingresos, df_gastos, 
 
 # --- PANTALLAS DE AUTENTICACIÓN ---
 if not st.session_state.logged_in:
+    # Estilos exclusivos de autenticación: cambian la presentación, no los flujos.
+    login_oscuro = st.session_state.get("modo_oscuro", False)
+    login_fondo = "#0B1220" if login_oscuro else "#F3F6FB"
+    login_superficie = "#111C2E" if login_oscuro else "#FFFFFF"
+    login_borde = "#2B3B52" if login_oscuro else "#DCE4EF"
+    login_texto = "#E8EEF7" if login_oscuro else "#17243A"
+    login_secundario = "#A8B6C9" if login_oscuro else "#63738A"
+    login_acento = "#6EA8FE" if login_oscuro else "#2457C5"
+    st.markdown(
+        f"""<style>
+        [data-testid="stAppViewContainer"] {{
+            background: radial-gradient(ellipse at 50% 0%, {'rgba(59,130,246,.16)' if login_oscuro else 'rgba(37,99,235,.10)'}, transparent 48%),
+                        linear-gradient(180deg, {login_fondo} 0%, {login_fondo} 100%) !important;
+        }}
+        [data-testid="stHeader"], [data-testid="stToolbar"] {{ background: transparent !important; }}
+        [data-testid="stMainBlockContainer"] {{
+            max-width: 760px !important; padding: 2.2rem clamp(1rem, 3vw, 2.4rem) 3rem !important;
+        }}
+        .main-header {{
+            color: {login_texto} !important; font-size: clamp(1.65rem, 3vw, 2.05rem) !important;
+            line-height: 1.2 !important; text-align: center; letter-spacing: -.04em !important;
+            margin: .35rem 0 .45rem !important;
+        }}
+        .sub-header {{
+            color: {login_secundario} !important; text-align: center; font-size: 1rem !important;
+            margin: 0 0 1.65rem !important;
+        }}
+        [data-testid="stTabs"] [role="tablist"] {{
+            justify-content: center; gap: .35rem; border-bottom: 1px solid {login_borde};
+        }}
+        [data-testid="stTabs"] button[role="tab"] {{
+            color: {login_secundario} !important; font-weight: 600 !important;
+            padding: .7rem .95rem !important; border-radius: 10px 10px 0 0;
+        }}
+        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+            color: {login_acento} !important; border-bottom-color: {login_acento} !important;
+        }}
+        [data-testid="stTabs"] [data-testid="stMarkdownContainer"] h3 {{
+            color: {login_texto} !important; font-size: 1.28rem; letter-spacing: -.02em;
+            margin: .65rem 0 1rem;
+        }}
+        [data-testid="stForm"] {{
+            background: {login_superficie} !important; border: 1px solid {login_borde} !important;
+            border-radius: 18px !important; padding: 1.2rem 1.35rem 1.3rem !important;
+            box-shadow: 0 16px 40px rgba(15, 23, 42, {'0.24' if login_oscuro else '0.08'}) !important;
+        }}
+        [data-testid="stTextInput"] label {{ color: {login_texto} !important; font-weight: 600 !important; }}
+        [data-testid="stTextInput"] input {{
+            min-height: 46px !important; border-radius: 10px !important;
+            background: {login_fondo} !important; border-color: {login_borde} !important;
+            color: {login_texto} !important; transition: border-color .18s, box-shadow .18s;
+        }}
+        [data-testid="stTextInput"] input:focus {{
+            border-color: {login_acento} !important; box-shadow: 0 0 0 3px {'rgba(110,168,254,.18)' if login_oscuro else 'rgba(36,87,197,.13)'} !important;
+        }}
+        [data-testid="stFormSubmitButton"] button {{
+            min-height: 46px; width: 100%; border: 0 !important; border-radius: 10px !important;
+            background: linear-gradient(135deg, {login_acento}, {'#3B82F6' if login_oscuro else '#3977E8'}) !important;
+            color: #FFFFFF !important; font-weight: 700 !important; transition: transform .18s, box-shadow .18s;
+            box-shadow: 0 7px 18px {'rgba(59,130,246,.25)' if login_oscuro else 'rgba(36,87,197,.19)'} !important;
+        }}
+        [data-testid="stFormSubmitButton"] button:hover {{ transform: translateY(-1px); box-shadow: 0 10px 22px rgba(37,99,235,.25) !important; }}
+        [data-testid="stLinkButton"] a {{
+            min-height: 46px; border-radius: 10px !important; border: 1px solid {login_borde} !important;
+            background: {login_superficie} !important; color: {login_texto} !important;
+            font-weight: 600 !important; transition: border-color .18s, box-shadow .18s, transform .18s;
+            box-shadow: 0 3px 10px rgba(15,23,42,.04);
+        }}
+        [data-testid="stLinkButton"] a:hover {{ border-color: {login_acento} !important; transform: translateY(-1px); }}
+        [data-testid="stLinkButton"] a > div {{ width: auto !important; flex: 0 0 auto !important; }}
+        [data-testid="stLinkButton"] a p {{ margin: 0 !important; }}
+        [data-testid="stAlert"] {{ border-radius: 12px !important; }}
+        @media (max-width: 600px) {{
+            [data-testid="stMainBlockContainer"] {{ padding: 1.2rem 1rem 2rem !important; }}
+            [data-testid="stForm"] {{ padding: 1rem !important; border-radius: 14px !important; }}
+            [data-testid="stTabs"] button[role="tab"] {{ padding: .6rem .55rem !important; font-size: .88rem !important; }}
+        }}
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
     # Procesa el retorno de Google (si Google acaba de redirigir con ?code=...)
     # ANTES de dibujar el formulario, para que si ya hay sesión válida no se
     # muestre el login de nuevo.
