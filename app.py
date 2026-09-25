@@ -165,6 +165,7 @@ firebase_secrets = st.secrets.get("firebase", {}) if "firebase" in st.secrets el
 FIREBASE_STORAGE_BUCKET = (
     firebase_secrets.get("storage_bucket")
     or os.environ.get("FIREBASE_STORAGE_BUCKET")
+    or "proyecto-app-ffdb5.firebasestorage.app"
 )
 
 if not firebase_admin._apps:
