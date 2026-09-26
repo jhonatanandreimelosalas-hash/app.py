@@ -63,24 +63,26 @@ def render_estilos(modo_oscuro: bool) -> str:
     puede alternar en vivo con un switch como este.
     """
     if modo_oscuro:
-        fondo_app = "#0F172A"
-        superficie = "#1E293B"
-        borde = "#334155"
-        texto_principal = "#E2E8F0"
-        texto_secundario = "#94A3B8"
-        acento = "#3B82F6"
-        acento_hover = "#60A5FA"
-        input_bg = "#0F172A"
+        fondo_app = "#0B1220"
+        superficie = "#111C2E"
+        superficie_sidebar = "#101A2B"
+        borde = "#2B3B52"
+        texto_principal = "#E8EEF7"
+        texto_secundario = "#A8B6C9"
+        acento = "#6EA8FE"
+        acento_hover = "#3B82F6"
+        input_bg = "#0B1220"
         color_scheme = "dark"
     else:
-        fondo_app = "#FFFFFF"
-        superficie = "#F8FAFC"
-        borde = "#E2E8F0"
-        texto_principal = "#1E293B"
-        texto_secundario = "#4B5563"
-        acento = "#1E3A8A"
-        acento_hover = "#2563EB"
-        input_bg = "#FFFFFF"
+        fondo_app = "#F2F5FA"
+        superficie = "#FFFFFF"
+        superficie_sidebar = "#E9EEF6"
+        borde = "#DCE4EF"
+        texto_principal = "#17243A"
+        texto_secundario = "#66758B"
+        acento = "#2457C5"
+        acento_hover = "#3977E8"
+        input_bg = "#F2F5FA"
         color_scheme = "light"
 
     return f"""
@@ -148,10 +150,174 @@ def render_estilos(modo_oscuro: bool) -> str:
 
         /* Corregir el texto dentro de los inputs de Streamlit */
         input::-webkit-input-placeholder {{ color: {texto_secundario} !important; }}
+
+        /* Sistema visual compartido: fondo suave, superficies blancas y azul institucional */
+        html, body, [data-testid="stAppViewContainer"] {{
+            font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif !important;
+        }}
+        .stApp {{ background-color: {fondo_app} !important; }}
+        [data-testid="stAppViewContainer"] {{
+            background: radial-gradient(ellipse at 50% 0%, {'rgba(59,130,246,.13)' if modo_oscuro else 'rgba(37,99,235,.06)'}, transparent 52%),
+                        {fondo_app} !important;
+        }}
+        [data-testid="stHeader"], [data-testid="stToolbar"] {{ background: transparent !important; }}
+        [data-testid="stDecoration"] {{ background-image:none !important; background-color:{acento} !important; }}
+        [data-testid="stMainBlockContainer"] {{
+            max-width:1600px !important; background:{superficie} !important;
+            border:1px solid {borde} !important; border-radius:22px !important;
+            margin:1.1rem auto 2rem !important; padding:1.65rem clamp(1rem, 2.5vw, 2.35rem) 2rem !important;
+            box-shadow:0 18px 48px rgba(15,23,42,{'0.22' if modo_oscuro else '0.055'}) !important;
+        }}
+        [data-testid="stSidebar"], [data-testid="stSidebarContent"] {{
+            background:{superficie_sidebar} !important; border-right:1px solid {borde} !important;
+        }}
+        [data-testid="stSidebarContent"] {{ padding:1rem .8rem 1.5rem !important; }}
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] {{ color:{texto_principal} !important; }}
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {{ color:{texto_principal} !important; }}
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h1,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h2,
+        [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] h3 {{
+            color:{texto_principal} !important; font-weight:700 !important; letter-spacing:-.025em;
+        }}
+        [data-testid="stMarkdownContainer"] h1,
+        [data-testid="stMarkdownContainer"] h2,
+        [data-testid="stMarkdownContainer"] h3,
+        [data-testid="stMarkdownContainer"] h4 {{
+            color:{texto_principal} !important; font-weight:700 !important; letter-spacing:-.025em;
+        }}
+        [data-testid="stMarkdownContainer"] p,
+        [data-testid="stMarkdownContainer"] li {{ color:{texto_principal}; line-height:1.6; }}
+        .main-header {{
+            color:{texto_principal} !important; font-size:clamp(1.7rem, 2.5vw, 2.05rem) !important;
+            line-height:1.2 !important; font-weight:760 !important; letter-spacing:-.04em !important;
+            margin:.15rem 0 .35rem !important;
+        }}
+        .sub-header {{
+            color:{texto_secundario} !important; font-size:1rem !important;
+            line-height:1.55 !important; margin:0 0 1.3rem !important;
+        }}
+        hr {{ border-color:{borde} !important; opacity:1 !important; margin:1.15rem 0 1.45rem !important; }}
+        a {{ color:{acento} !important; }}
+        [data-testid="stVerticalBlockBorderWrapper"] {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            border-radius:16px !important; box-shadow:0 8px 24px rgba(15,23,42,{'0.15' if modo_oscuro else '0.035'});
+        }}
+        [data-testid="stForm"] {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            border-radius:16px !important; padding:1.2rem 1.3rem 1.25rem !important;
+            box-shadow:0 10px 30px rgba(15,23,42,{'0.17' if modo_oscuro else '0.045'}) !important;
+        }}
+        [data-testid="stExpander"] {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            border-radius:14px !important; overflow:hidden;
+        }}
+        [data-testid="stExpander"] summary {{
+            background:{superficie} !important; color:{texto_principal} !important;
+            font-weight:650 !important; padding:.8rem 1rem !important;
+        }}
+        [data-testid="stMetric"] {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            border-radius:16px !important; padding:1rem 1.15rem !important;
+            box-shadow:0 8px 24px rgba(15,23,42,{'0.16' if modo_oscuro else '0.04'}) !important;
+            min-height:100%;
+        }}
+        [data-testid="stMetricLabel"] {{ color:{texto_secundario} !important; font-weight:650 !important; }}
+        [data-testid="stMetricValue"] {{ color:{texto_principal} !important; font-weight:750 !important; letter-spacing:-.035em; }}
+        [data-testid="stTextInput"] label,
+        [data-testid="stTextArea"] label,
+        [data-testid="stNumberInput"] label,
+        [data-testid="stDateInput"] label,
+        [data-testid="stSelectbox"] label,
+        [data-testid="stMultiSelect"] label {{ color:{texto_principal} !important; font-weight:600 !important; }}
+        [data-testid="stTextInput"] input,
+        [data-testid="stTextArea"] textarea,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stDateInput"] input {{
+            min-height:44px !important; background:{input_bg} !important; color:{texto_principal} !important;
+            border:1px solid {borde} !important; border-radius:10px !important;
+            transition:border-color .18s, box-shadow .18s;
+        }}
+        [data-testid="stTextInput"] input:focus,
+        [data-testid="stTextArea"] textarea:focus,
+        [data-testid="stNumberInput"] input:focus,
+        [data-testid="stDateInput"] input:focus {{
+            border-color:{acento} !important; box-shadow:0 0 0 3px {'rgba(110,168,254,.17)' if modo_oscuro else 'rgba(36,87,197,.11)'} !important;
+        }}
+        div[data-baseweb="select"] > div {{
+            min-height:44px; background:{input_bg} !important; color:{texto_principal} !important;
+            border:1px solid {borde} !important; border-radius:10px !important;
+        }}
+        input::placeholder, textarea::placeholder {{ color:{texto_secundario} !important; opacity:.78; }}
+        input[type="checkbox"], input[type="radio"] {{ accent-color:{acento}; }}
+        .stButton > button, .stDownloadButton > button {{
+            min-height:42px; border:1px solid transparent !important; border-radius:10px !important;
+            background:linear-gradient(135deg, {acento}, {acento_hover}) !important;
+            color:#FFFFFF !important; font-weight:650 !important; letter-spacing:.005em;
+            box-shadow:0 6px 16px rgba(36,87,197,{'0.22' if not modo_oscuro else '0.27'}) !important;
+            transition:transform .16s, box-shadow .16s, filter .16s;
+        }}
+        .stButton > button:hover, .stDownloadButton > button:hover {{
+            transform:translateY(-1px); filter:brightness(1.04);
+            box-shadow:0 9px 20px rgba(36,87,197,.24) !important;
+        }}
+        .stButton > button:disabled, .stDownloadButton > button:disabled {{ opacity:.52; box-shadow:none !important; }}
+        .stButton > button[kind="secondary"] {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            color:{acento} !important; box-shadow:none !important;
+        }}
+        [data-testid="stSidebar"] .stButton > button {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            color:{texto_principal} !important; box-shadow:none !important;
+        }}
+        [data-testid="stLinkButton"] a {{
+            border-radius:10px !important; border:1px solid {borde} !important;
+            background:{superficie} !important; color:{texto_principal} !important;
+            font-weight:650 !important; box-shadow:0 3px 10px rgba(15,23,42,.035);
+        }}
+        [data-testid="stFileUploaderDropzone"] {{
+            background:{input_bg} !important; border:1px dashed {borde} !important;
+            border-radius:14px !important; color:{texto_secundario} !important;
+        }}
+        [data-testid="stAlert"] {{
+            background:{superficie} !important; color:{texto_principal} !important;
+            border:1px solid {borde} !important; border-radius:12px !important;
+            box-shadow:0 4px 14px rgba(15,23,42,{'0.12' if modo_oscuro else '0.025'});
+        }}
+        [data-testid="stDataFrame"], [data-testid="stTable"] {{
+            border:1px solid {borde} !important; border-radius:12px !important; overflow:hidden;
+        }}
+        [data-testid="stPlotlyChart"] {{
+            background:{superficie} !important; border:1px solid {borde} !important;
+            border-radius:16px !important; padding:.35rem !important;
+            box-shadow:0 8px 24px rgba(15,23,42,{'0.14' if modo_oscuro else '0.035'});
+        }}
+        [data-testid="stTabs"] [role="tablist"] {{ border-bottom:1px solid {borde}; gap:.25rem; }}
+        [data-testid="stTabs"] button[role="tab"] {{
+            color:{texto_secundario} !important; font-weight:650 !important;
+            border-radius:10px 10px 0 0; padding:.7rem 1rem !important;
+        }}
+        [data-testid="stTabs"] button[role="tab"][aria-selected="true"] {{
+            color:{acento} !important; border-bottom-color:{acento} !important;
+        }}
+        [data-testid="stSidebar"] [data-testid="stSelectbox"] label {{ color:{texto_secundario} !important; font-weight:650 !important; }}
+        .sidebar-brand {{
+            display:flex; align-items:center; gap:.75rem; padding:.2rem .15rem 1rem;
+            margin:0 0 .9rem; border-bottom:1px solid {borde};
+        }}
+        .sidebar-brand img {{ width:46px; height:46px; object-fit:contain; flex:0 0 46px; }}
+        .sidebar-brand strong {{ display:block; color:{texto_principal}; font-size:.92rem; line-height:1.25; }}
+        .sidebar-brand span {{ display:block; color:{texto_secundario} !important; font-size:.75rem; margin-top:.18rem; }}
+        @media (max-width:700px) {{
+            [data-testid="stMainBlockContainer"] {{ margin:.45rem auto 1rem !important; padding:1.1rem .8rem 1.4rem !important; border-radius:16px !important; }}
+            .main-header {{ font-size:1.6rem !important; }}
+            [data-testid="stForm"] {{ padding:1rem !important; border-radius:14px !important; }}
+        }}
     </style>
     """
 
 st.markdown(render_estilos(st.session_state.modo_oscuro), unsafe_allow_html=True)
+if hasattr(px, "defaults"):
+    px.defaults.template = "plotly_dark" if st.session_state.modo_oscuro else "plotly_white"
 
 if st.sidebar.toggle("🌙 Modo oscuro", key="modo_oscuro_toggle", value=st.session_state.get('modo_oscuro', False)):
     if not st.session_state.modo_oscuro:
@@ -1585,6 +1751,13 @@ if "omitir_alerta_presupuesto" not in st.session_state:
     st.session_state.omitir_alerta_presupuesto = False
 
 # --- MENÚ LATERAL ---
+if LOGO_PATH.is_file():
+    logo_sidebar_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+    st.sidebar.markdown(
+        f'<div class="sidebar-brand"><img src="data:image/png;base64,{logo_sidebar_b64}" alt="Logo">'
+        '<div><strong>Gestión Financiera</strong><span>Portal empresarial</span></div></div>',
+        unsafe_allow_html=True,
+    )
 st.sidebar.markdown(f"👋 **Hola, {st.session_state.user_data['institucion']}**")
 if st.sidebar.button("🚪 Cerrar Sesión"):
     st.session_state.logged_in = False
