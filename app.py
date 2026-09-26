@@ -7,7 +7,6 @@ from openpyxl.utils import get_column_letter
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 from io import BytesIO
-from datetime import datetime
 import plotly.express as px
 import os
 import bcrypt
@@ -19,7 +18,7 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import random
 import string
-import datetime as dt_module  # renombrado para no chocar con 'from datetime import datetime'
+import datetime as dt_module  # módulo único para fechas y horas
 import uuid
 import base64
 from pathlib import Path
@@ -1163,7 +1162,7 @@ def generar_reporte_pdf_corporativo(nombre_institucion, df_ingresos, df_gastos, 
     story = [
         Paragraph(nombre_institucion.upper(), estilo_titulo),
         Paragraph("Reporte Financiero Corporativo", estilo_subtitulo),
-        Paragraph(f"Generado el {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", estilo_subtitulo),
+        Paragraph(f"Generado el {dt_module.datetime.now().strftime('%Y-%m-%d %H:%M')}", estilo_subtitulo),
         Spacer(1, 16),
         Paragraph("Balance General", estilo_seccion),
     ]
@@ -1317,7 +1316,7 @@ if not st.session_state.logged_in:
                                 'password': hash_password(pass_reg),
                                 'rol': invitacion.get('rol', 'Analista'),
                                 'empresa_id': invitacion.get('empresa_id'),
-                                'fecha_creacion': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'fecha_creacion': dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                             }
                             db.collection('usuarios').document(email_clean).set(nuevo_usuario)
                             db.collection('usuarios').document(invitacion.get('empresa_id')).collection('empleados').document(email_clean).update({'nombre': inst_name, 'estado': 'Activo'})
@@ -1329,7 +1328,7 @@ if not st.session_state.logged_in:
                                 'password': hash_password(pass_reg),
                                 'rol': 'Propietario',
                                 'empresa_id': email_clean,
-                                'fecha_creacion': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                'fecha_creacion': dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                             }
                             db.collection('usuarios').document(email_clean).set(nuevo_usuario)
                             st.success("¡Cuenta creada exitosamente! Ya puedes iniciar sesión.")
@@ -1397,15 +1396,15 @@ st.sidebar.caption(f"**Empresa:** {obtener_nombre_empresa()}\n\nCorreo base: {em
 st.sidebar.markdown("⚙️ **Presupuesto de la empresa**")
 
 config_presupuesto = cargar_presupuesto_general()
-hoy = datetime.date.today()
+hoy = dt_module.date.today()
 try:
-    fecha_inicio_guardada = datetime.date.fromisoformat(config_presupuesto.get("fecha_inicio", hoy.isoformat()))
+    fecha_inicio_guardada = dt_module.date.fromisoformat(config_presupuesto.get("fecha_inicio", hoy.isoformat()))
 except (TypeError, ValueError):
     fecha_inicio_guardada = hoy
 try:
-    fecha_fin_guardada = datetime.date.fromisoformat(config_presupuesto.get("fecha_fin", (hoy + datetime.timedelta(days=30)).isoformat()))
+    fecha_fin_guardada = dt_module.date.fromisoformat(config_presupuesto.get("fecha_fin", (hoy + dt_module.timedelta(days=30)).isoformat()))
 except (TypeError, ValueError):
-    fecha_fin_guardada = hoy + datetime.timedelta(days=30)
+    fecha_fin_guardada = hoy + dt_module.timedelta(days=30)
 
 puede_configurar_presupuesto = tiene_permiso("configurar_presupuesto")
 with st.sidebar.form("form_presupuesto_general"):
@@ -1508,8 +1507,6 @@ if st.session_state.ia_abierta:
                         st.error(f"Error con la IA: {e}")
 
 # --- RUTAS DE LAS PÁGINAS ---
-import datetime
-
 if menu == "1. Inicio":
     st.markdown('<p class="main-header">Portal de Control Financiero</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Plataforma centralizada para la administración y supervisión de recursos</p>', unsafe_allow_html=True)
@@ -1541,7 +1538,7 @@ elif menu == "2. Registro de Ingresos":
             with st.form(f"form_nuevo_ingreso_{get_institucion_id()}"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    f_ing = st.date_input("Fecha", value=datetime.date.today())
+                    f_ing = st.date_input("Fecha", value=dt_module.date.today())
                     con_ing = st.text_input("Concepto")
                 with c2:
                     resp_ing = st.text_input("Responsable", value=obtener_nombre_usuario_actual())
@@ -1626,7 +1623,7 @@ elif menu == "3. Registro de Gastos":
             with st.form(f"form_nuevo_gasto_{get_institucion_id()}"):
                 c1, c2 = st.columns(2)
                 with c1:
-                    f_gas = st.date_input("Fecha Gasto", value=datetime.date.today())
+                    f_gas = st.date_input("Fecha Gasto", value=dt_module.date.today())
                     con_gas = st.text_input("Concepto")
                     cat_gas = st.selectbox("Categoría", CATEGORIAS_GASTO)
                 with c2:
@@ -1826,8 +1823,8 @@ elif menu == "6. Anexo de Recibos & QR":
         qr.make(fit=True)
         qr_img_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
 
-        rec_id = f"GEN-{datetime.datetime.now().strftime('%Y%m%d%H%M')}"
-        fecha_actual = datetime.datetime.now().strftime("%Y-%m-%d")
+        rec_id = f"GEN-{dt_module.datetime.now().strftime('%Y%m%d%H%M')}"
+        fecha_actual = dt_module.datetime.now().strftime("%Y-%m-%d")
         buffer_recibo = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, qr_img_pil, nombre_empresa_recibo)
         st.session_state.rec_img_bytes = buffer_recibo.getvalue()
         st.success("✅ ¡Comprobante generado exitosamente!")
@@ -1866,7 +1863,7 @@ elif menu == "7. Gestión de Archivos":
                     "tipo": archivo_subido.type,
                     "archivo_b64": base64_archivo,
                     "descripcion": descripcion_archivo if descripcion_archivo else "Sin descripción",
-                    "fecha": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "fecha": dt_module.datetime.now().strftime("%Y-%m-%d %H:%M"),
                     "subido_por": st.session_state.user_data['institucion']
                 }
                 db.collection("usuarios").document(institucion_id).collection("archivos").document(nombre_id).set(doc_data)
@@ -2196,9 +2193,9 @@ elif menu == "10. Facturas (OCR) y Anomalías":
                     with c2:
                         fecha_texto = datos.get("fecha")
                         try:
-                            fecha_inicial = datetime.date.fromisoformat(str(fecha_texto)) if fecha_texto else datetime.date.today()
+                            fecha_inicial = dt_module.date.fromisoformat(str(fecha_texto)) if fecha_texto else dt_module.date.today()
                         except (TypeError, ValueError):
-                            fecha_inicial = datetime.date.today()
+                            fecha_inicial = dt_module.date.today()
                         fecha = st.date_input("Fecha", value=fecha_inicial, key=f"ocr_{clave}_fecha")
                         responsable = st.text_input("Responsable", value=obtener_nombre_usuario_actual(), key=f"ocr_{clave}_responsable")
                         categoria_sugerida = datos.get("categoria_sugerida")
