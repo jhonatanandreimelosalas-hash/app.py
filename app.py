@@ -18,15 +18,19 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 import random
 import string
-import datetime as dt_module  # módulo único para fechas y horas
-import uuid
+import datetime as dt_module
 import base64
 from pathlib import Path
+import hashlib
+import re
+import tempfile
+import uuid
+from urllib.parse import quote
 
 # --- CONFIGURACIÓN DE PÁGINA ---
 LOGO_PATH = Path(__file__).resolve().parent / "assets" / "logo_financiero.png"
 st.set_page_config(
-    page_title="Portal de Gestión Financiera",
+    page_title="Gestión Financiera Empresarial",
     page_icon=str(LOGO_PATH) if LOGO_PATH.is_file() else "💰",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -51,8 +55,12 @@ def render_estilos(modo_oscuro: bool) -> str:
     contenedores estructurales de Streamlit (toolbar, línea decorativa superior,
     contenedor de vista principal), no solo el cuerpo de la app.
 
-    Las tablas y las gráficas usan el mismo selector para conservar el contraste
-    aunque el tema interno del navegador o de Streamlit sea distinto.
+    LÍMITE HONESTO: el `st.dataframe` nativo de Streamlit se dibuja con un
+    componente de canvas (no HTML plano) que toma sus colores del tema interno de
+    Streamlit, no de este CSS. Puede que las tablas se vean con fondo claro incluso
+    en modo oscuro — eso no se puede forzar con CSS puro; requeriría fijar el tema
+    real de Streamlit (archivo .streamlit/config.toml), que es estático y no se
+    puede alternar en vivo con un switch como este.
     """
     if modo_oscuro:
         fondo_app = "#0F172A"
@@ -79,8 +87,8 @@ def render_estilos(modo_oscuro: bool) -> str:
     <style>
         :root {{ color-scheme: {color_scheme}; }}
 
-        /* Superficies principales: el color de la app no depende del tema del navegador */
-        html, body, .stApp {{ background: {fondo_app} !important; color: {texto_principal} !important; color-scheme: {color_scheme}; }}
+        /* Cuerpo de la app */
+        .stApp {{ background-color: {fondo_app}; color: {texto_principal}; }}
 
         /* Header/toolbar nativos de Streamlit — antes quedaban sin colorear y
            creaban la franja clara/oscura desalineada que reportaste */
@@ -88,9 +96,37 @@ def render_estilos(modo_oscuro: bool) -> str:
         [data-testid="stToolbar"] {{ background-color: {fondo_app} !important; }}
         [data-testid="stDecoration"] {{ background-image: none !important; background-color: {acento} !important; }}
         [data-testid="stAppViewContainer"] {{ background-color: {fondo_app} !important; }}
-        [data-testid="stMain"], [data-testid="stMainBlockContainer"] {{ background-color: {fondo_app} !important; color: {texto_principal} !important; }}
         [data-testid="stBottomBlockContainer"] {{ background-color: {fondo_app} !important; }}
-        [data-testid="stSidebar"] > div:first-child {{ background-color: {superficie} !important; }}
+        [data-testid="stMainBlockContainer"] {{ background-color: {fondo_app} !important; }}
+        [data-testid="stSidebarContent"] {{ background-color: {superficie} !important; }}
+        [data-testid="stFileUploaderDropzone"],
+        [data-testid="stExpander"] details,
+        [data-testid="stForm"],
+        [data-baseweb="popover"] > div,
+        [data-baseweb="menu"],
+        ul[role="listbox"] {{
+            background-color: {superficie} !important;
+            color: {texto_principal} !important;
+            border-color: {borde} !important;
+        }}
+        [role="option"]:hover,
+        [data-testid="stDateInput"] input,
+        [data-testid="stNumberInput"] input,
+        [data-testid="stTextInput"] input,
+        [data-testid="stTextArea"] textarea {{
+            background-color: {input_bg} !important;
+            color: {texto_principal} !important;
+            border-color: {borde} !important;
+        }}
+        [data-testid="stAlert"] {{
+            background-color: {superficie} !important;
+            color: {texto_principal} !important;
+            border: 1px solid {borde} !important;
+        }}
+        [data-testid="stDataFrame"] {{
+            border: 1px solid {borde} !important;
+            border-radius: 8px;
+        }}
 
         .main-header {{ font-size: 2.3rem; color: {acento}; font-weight: 800; margin-bottom: 0px; letter-spacing: -0.5px; }}
         .sub-header {{ font-size: 1.1rem; color: {texto_secundario}; margin-bottom: 20px; }}
@@ -105,81 +141,19 @@ def render_estilos(modo_oscuro: bool) -> str:
         /* Corregir contenedores, expanders y áreas de chat/IA para que no oculten las letras */
         div[data-testid="stExpander"], div[data-testid="stVerticalBlock"] {{ color: {texto_principal}; background-color: transparent; }}
         div[data-testid="stExpander"] summary {{ background-color: {superficie}; }}
-        [data-baseweb="popover"], [data-baseweb="menu"], [role="listbox"] {{ background-color: {superficie} !important; color: {texto_principal} !important; }}
-        [role="option"] {{ color: {texto_principal} !important; }}
 
         /* Forzar colores en campos de entrada, áreas de texto y selectores */
         input, textarea, select {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
-        div[data-baseweb="select"] > div, div[data-baseweb="input"] > div, div[data-baseweb="textarea"] > div {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
+        div[data-baseweb="select"] > div {{ background-color: {input_bg} !important; color: {texto_principal} !important; border-color: {borde} !important; }}
 
         /* Corregir el texto dentro de los inputs de Streamlit */
         input::-webkit-input-placeholder {{ color: {texto_secundario} !important; }}
     </style>
     """
 
-
-def aplicar_tema_grafico(figura):
-    """Alinea las gráficas de Plotly con el selector claro/oscuro de la app."""
-    oscuro = st.session_state.get("modo_oscuro", False)
-    figura.update_layout(
-        template="plotly_dark" if oscuro else "plotly_white",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font_color="#E2E8F0" if oscuro else "#1E293B",
-    )
-    return figura
-
-
-def mostrar_tabla_adaptativa(df, hide_index=True, columna_alerta=None):
-    """Renderiza una tabla HTML segura que sigue el tema aunque Streamlit use otro."""
-    if df is None or df.empty:
-        st.info("No hay datos para mostrar.")
-        return
-    oscuro = st.session_state.get("modo_oscuro", False)
-    fondo = "#0F172A" if oscuro else "#FFFFFF"
-    superficie = "#1E293B" if oscuro else "#F8FAFC"
-    texto = "#E2E8F0" if oscuro else "#1E293B"
-    borde = "#334155" if oscuro else "#E2E8F0"
-    tabla = df.to_html(index=not hide_index, escape=True, border=0, classes="tabla-adaptativa")
-    if columna_alerta and columna_alerta in df.columns:
-        filas = []
-        inicio = tabla.find("<tbody>")
-        fin = tabla.find("</tbody>", inicio)
-        if inicio >= 0 and fin >= 0:
-            cuerpo = tabla[inicio:fin]
-            posicion = 0
-            for _, fila in df.iterrows():
-                fila_fin = cuerpo.find("<tr", posicion)
-                if fila_fin < 0:
-                    break
-                cierre = cuerpo.find(">", fila_fin)
-                if cierre < 0:
-                    break
-                try:
-                    alerta = float(fila[columna_alerta]) > 0
-                except (TypeError, ValueError):
-                    alerta = False
-                if alerta:
-                    cuerpo = cuerpo[:fila_fin] + '<tr class="fila-alerta"' + cuerpo[cierre:]
-                    cierre = cuerpo.find(">", fila_fin)
-                posicion = cierre + 1
-            tabla = tabla[:inicio] + cuerpo + tabla[fin:]
-    color_alerta = "#7F1D1D" if oscuro else "#FEE2E2"
-    st.markdown(
-        f'''<div style="overflow-x:auto;border:1px solid {borde};border-radius:10px;background:{fondo};">
-        <style>
-        .tabla-adaptativa {{ width:100%; border-collapse:collapse; color:{texto}; font-size:0.92rem; }}
-        .tabla-adaptativa th {{ position:sticky;top:0;background:{superficie};text-align:left;font-weight:700; }}
-        .tabla-adaptativa th,.tabla-adaptativa td {{ padding:0.55rem 0.75rem;border-bottom:1px solid {borde}; }}
-        .tabla-adaptativa tbody tr:nth-child(even) {{ background:{superficie}; }}
-        .tabla-adaptativa tbody tr.fila-alerta {{ background:{color_alerta}; }}
-        </style>{tabla}</div>''',
-        unsafe_allow_html=True,
-    )
-
 st.markdown(render_estilos(st.session_state.modo_oscuro), unsafe_allow_html=True)
 
-if st.sidebar.toggle("Modo oscuro", key="modo_oscuro_toggle", value=st.session_state.get('modo_oscuro', False)):
+if st.sidebar.toggle("🌙 Modo oscuro", key="modo_oscuro_toggle", value=st.session_state.get('modo_oscuro', False)):
     if not st.session_state.modo_oscuro:
         st.session_state.modo_oscuro = True
         st.rerun()
@@ -189,12 +163,18 @@ else:
         st.rerun()
 
 # --- INICIALIZACIÓN DE FIREBASE ---
-FIREBASE_STORAGE_BUCKET = 'proyecto-app-ffdb5.appspot.com'
+firebase_secrets = st.secrets.get("firebase", {}) if "firebase" in st.secrets else {}
+FIREBASE_STORAGE_BUCKET = (
+    firebase_secrets.get("storage_bucket")
+    or os.environ.get("FIREBASE_STORAGE_BUCKET")
+    or "proyecto-app-ffdb5.firebasestorage.app"
+)
 
 if not firebase_admin._apps:
     try:
         if "firebase" in st.secrets:
             cred_dict = dict(st.secrets["firebase"])
+            cred_dict.pop("storage_bucket", None)
             cred_dict["private_key"] = cred_dict["private_key"].replace("\\n", "\n")
             cred = credentials.Certificate(cred_dict)
         elif os.path.exists('firebase_key.json'):
@@ -203,16 +183,29 @@ if not firebase_admin._apps:
             st.error("⚠️ No se encontraron credenciales de Firebase.")
             st.stop()
 
-        firebase_admin.initialize_app(cred, {
-            'storageBucket': FIREBASE_STORAGE_BUCKET
-        })
+        # Usa un valor explícito de configuración si existe. Si no, deriva el
+        # bucket moderno desde el project_id del service account. Para proyectos
+        # con bucket legacy o personalizado, define firebase.storage_bucket.
+        if not FIREBASE_STORAGE_BUCKET:
+            project_id = getattr(cred, "project_id", None)
+            if project_id:
+                FIREBASE_STORAGE_BUCKET = f"{project_id}.firebasestorage.app"
+
+        firebase_options = {}
+        if FIREBASE_STORAGE_BUCKET:
+            firebase_options["storageBucket"] = FIREBASE_STORAGE_BUCKET
+        firebase_admin.initialize_app(cred, firebase_options)
     except Exception as e:
         st.error(f"⚠️ Error al conectar con Firebase: {e}")
 
 db = firestore.client() if firebase_admin._apps else None
-bucket = storage.bucket() if firebase_admin._apps else None
+bucket = (
+    storage.bucket(FIREBASE_STORAGE_BUCKET)
+    if firebase_admin._apps and FIREBASE_STORAGE_BUCKET else None
+)
 
 # --- DATOS GLOBALES ---
+EXCEL_FILE = "Proyecto_Financiero_Actualizado.xlsx"
 
 # --- CONTROL DE SESIÓN ---
 if 'logged_in' not in st.session_state:
@@ -275,50 +268,6 @@ def get_institucion_id():
     return None
 
 
-def generar_id_registro(prefijo):
-    """Crea IDs únicos incluso cuando se procesa un lote de movimientos."""
-    sello = dt_module.datetime.now().strftime("%Y%m%d%H%M%S%f")
-    return f"{prefijo}-{sello}-{uuid.uuid4().hex[:8]}"
-
-
-def limpiar_datos_privados_sesion():
-    """Borra datos y adjuntos de la empresa anterior al salir o cambiar de cuenta."""
-    st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones", "ID"])
-    st.session_state.gastos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor", "Responsable", "ID"])
-    for llave in ("ocr_comprobantes", "factura_extraida", "ingreso_extraido", "rec_img_bytes", "excel_reporte_bytes", "pdf_reporte_bytes", "roles_empresa_cache"):
-        st.session_state.pop(llave, None)
-    for llave in list(st.session_state.keys()):
-        if str(llave).startswith(("upload_comprobantes_lote_", "repositorio_upload_")):
-            st.session_state.pop(llave, None)
-
-
-def validar_y_actualizar_acceso_empresa():
-    """Al recargar la app, actualiza el rango del empleado y bloquea accesos revocados."""
-    usuario = st.session_state.get("user_data") or {}
-    empresa_id = usuario.get("empresa_id")
-    correo = (usuario.get("email") or "").lower().strip()
-    if not db or not empresa_id or empresa_id.lower().strip() == correo:
-        return True
-    try:
-        miembro_ref = db.collection("usuarios").document(empresa_id).collection("empleados").document(correo)
-        miembro_doc = miembro_ref.get()
-        miembro = miembro_doc.to_dict() or {}
-        if not miembro_doc.exists or miembro.get("estado") != "Activo":
-            st.session_state.logged_in = False
-            st.session_state.user_data = None
-            st.session_state.roles_empresa_cache = None
-            st.error("El acceso a esta empresa fue revocado o la invitación ya no está activa. Contacta al propietario.")
-            return False
-        usuario["rol"] = miembro.get("rol", "Analista")
-        if miembro.get("nombre"):
-            usuario["institucion"] = miembro["nombre"]
-        st.session_state.user_data = usuario
-        return True
-    except Exception:
-        st.error("No se pudo validar tu pertenencia a la empresa. Intenta de nuevo cuando haya conexión.")
-        return False
-
-
 # =====================================================================================
 # ROLES Y PERMISOS (multi-empresa)
 # -------------------------------------------------------------------------------------
@@ -333,113 +282,123 @@ def validar_y_actualizar_acceso_empresa():
 # quitarle acceso a nadie que ya estaba usando la app.
 # =====================================================================================
 
-ROLES_BASE = {
-    "Propietario": {"ver_finanzas", "gestionar_equipo", "gestionar_roles", "gestionar_archivos", "aprobar_pendientes", "configurar_presupuesto", "ver_auditoria", "registrar", "eliminar_registros"},
-    "Gerente Financiero": {"ver_finanzas", "gestionar_equipo", "gestionar_archivos", "aprobar_pendientes", "configurar_presupuesto", "ver_auditoria", "registrar", "eliminar_registros"},
-    "Analista": {"ver_finanzas", "gestionar_archivos", "registrar"},
+def get_perm_labels():
+    return {
+        "ver_finanzas": "Ver ingresos, gastos, balance, paneles y reportes",
+        "registrar": "Registrar ingresos y gastos",
+        "subir_comprobantes": "Subir y procesar comprobantes con IA",
+        "aprobar_pendientes": "Aprobar o rechazar ingresos y gastos pendientes",
+        "configurar_presupuesto": "Configurar presupuestos y períodos",
+        "ver_auditoria": "Consultar la auditoría",
+        "gestionar_archivos": "Administrar documentos de la empresa",
+        "eliminar_registros": "Eliminar ingresos y gastos ya registrados",
+        "generar_recibos": "Generar comprobantes y códigos QR",
+        "gestionar_equipo": "Invitar empleados y administrar rangos",
+    }
+
+PERMISOS_DISPONIBLES = get_perm_labels()
+TODOS_LOS_PERMISOS = set(PERMISOS_DISPONIBLES)
+ROLES_DISPONIBLES = ["Propietario", "Gerente Financiero", "Analista", "Auditor"]
+
+PERMISOS_POR_ROL = {
+    "Propietario": set(TODOS_LOS_PERMISOS),
+    "Gerente Financiero": {
+        "ver_finanzas", "registrar", "subir_comprobantes", "aprobar_pendientes",
+        "configurar_presupuesto", "ver_auditoria", "gestionar_archivos",
+        "eliminar_registros", "generar_recibos",
+    },
+    "Analista": {
+        "ver_finanzas", "registrar", "subir_comprobantes", "gestionar_archivos",
+    },
     "Auditor": {"ver_finanzas", "ver_auditoria"},
 }
 
-PERMISOS_DISPONIBLES = {
-    "ver_finanzas": "Consultar registros e informes financieros",
-    "registrar": "Registrar ingresos o gastos",
-    "eliminar_registros": "Eliminar ingresos o gastos registrados",
-    "aprobar_pendientes": "Aprobar o rechazar movimientos pendientes",
-    "configurar_presupuesto": "Configurar presupuestos y períodos",
-    "ver_auditoria": "Consultar la auditoría de la empresa",
-    "gestionar_equipo": "Invitar y administrar integrantes",
-    "gestionar_archivos": "Guardar y eliminar archivos de la empresa",
-}
+
+def cargar_roles_personalizados():
+    institucion_id = get_institucion_id()
+    if not db or not institucion_id:
+        return {}
+    try:
+        doc = db.collection("usuarios").document(institucion_id).get()
+        datos = doc.to_dict() or {}
+        roles = datos.get("roles_personalizados", {})
+        return roles if isinstance(roles, dict) else {}
+    except Exception:
+        return {}
 
 
-def obtener_configuracion_roles(forzar=False):
-    """Devuelve permisos configurados por la empresa y conserva los roles base."""
-    empresa_id = get_institucion_id()
-    clave_cache = st.session_state.get("roles_empresa_cache")
-    if not forzar and clave_cache and clave_cache.get("empresa_id") == empresa_id:
-        return clave_cache.get("roles", {})
-
-    roles = {nombre: sorted(permisos) for nombre, permisos in ROLES_BASE.items()}
-    if db and empresa_id:
-        try:
-            datos = db.collection("usuarios").document(empresa_id).get().to_dict() or {}
-            personalizados = datos.get("roles_config", {})
-            if isinstance(personalizados, dict):
-                for nombre, permisos in personalizados.items():
-                    if nombre and nombre != "Propietario" and isinstance(permisos, list):
-                        roles[str(nombre)] = [p for p in permisos if p in PERMISOS_DISPONIBLES]
-        except Exception:
-            pass
-    st.session_state.roles_empresa_cache = {"empresa_id": empresa_id, "roles": roles}
-    return roles
+def obtener_roles_asignables():
+    roles_custom = cargar_roles_personalizados()
+    return [r for r in ROLES_DISPONIBLES if r != "Propietario"] + sorted(roles_custom.keys())
 
 
-def obtener_nombres_roles():
-    roles = obtener_configuracion_roles()
-    return ["Propietario"] + sorted(nombre for nombre in roles if nombre != "Propietario")
+def permisos_del_usuario():
+    user_data = st.session_state.get("user_data") or {}
+    rol_actual = user_data.get("rol", "Propietario")
+    if rol_actual == "Propietario":
+        return set(TODOS_LOS_PERMISOS)
+    roles_custom = cargar_roles_personalizados()
+    if rol_actual in roles_custom:
+        permisos = roles_custom[rol_actual].get("permisos", [])
+        return set(permisos) & TODOS_LOS_PERMISOS
+    return set(PERMISOS_POR_ROL.get(rol_actual, set()))
 
 
 def tiene_permiso(accion: str) -> bool:
-    if not st.session_state.user_data:
+    return accion in permisos_del_usuario()
+
+
+def validar_membresia_actual():
+    user_data = st.session_state.get("user_data") or {}
+    if not user_data:
         return False
-    rol_actual = st.session_state.user_data.get('rol', 'Propietario')
-    if rol_actual == "Propietario":
+    email = (user_data.get("email") or "").lower().strip()
+    empresa_id = (user_data.get("empresa_id") or email).lower().strip()
+    if not email or not empresa_id:
+        return False
+    if empresa_id == email:
         return True
-    permisos = obtener_configuracion_roles().get(rol_actual)
-    if permisos is None:
-        return accion in ROLES_BASE.get("Analista", set())
-    return accion in permisos
-
-
-def obtener_nombre_usuario_actual():
-    usuario = st.session_state.get("user_data") or {}
-    return usuario.get("institucion") or usuario.get("email") or "Usuario"
-
-
-def obtener_nombre_empresa():
-    empresa_id = get_institucion_id()
-    if db and empresa_id:
-        try:
-            datos = db.collection("usuarios").document(empresa_id).get().to_dict() or {}
-            return datos.get("institucion") or empresa_id
-        except Exception:
-            pass
-    return empresa_id or "Empresa"
+    if not db:
+        return False
+    try:
+        miembro = db.collection("usuarios").document(empresa_id).collection("empleados").document(email).get()
+        if not miembro.exists:
+            return False
+        datos = miembro.to_dict() or {}
+        if datos.get("estado") != "Activo":
+            return False
+        user_data["rol"] = datos.get("rol", "Analista")
+        return True
+    except Exception:
+        return False
 
 
 def obtener_lista_responsables():
-    """Muestra una muestra acotada del equipo para no leer miles de documentos."""
+    user_data = st.session_state.get("user_data") or {}
     institucion_id = get_institucion_id()
+    fallback = [user_data.get("institucion") or user_data.get("email") or "Usuario actual"]
     if not db or not institucion_id:
-        return [obtener_nombre_usuario_actual()]
+        return fallback
     try:
         nombres = []
-        doc_empresa = db.collection('usuarios').document(institucion_id).get()
+        doc_empresa = db.collection("usuarios").document(institucion_id).get()
         datos_empresa = doc_empresa.to_dict() or {}
-        nombre_dueno = datos_empresa.get('institucion')
-        if nombre_dueno:
-            nombres.append(nombre_dueno)
-
+        nombres.append(datos_empresa.get("responsable") or datos_empresa.get("email") or institucion_id)
         empleados_ref = (
-            db.collection('usuarios').document(institucion_id).collection('empleados')
-            .where('estado', '==', 'Activo').limit(100).stream()
+            db.collection("usuarios").document(institucion_id).collection("empleados")
+            .where("estado", "==", "Activo").stream()
         )
         for emp in empleados_ref:
-            emp_data = emp.to_dict()
-            nombres.append(emp_data.get('nombre') or emp_data.get('email', ''))
-
-        if nombres:
-            return nombres
-        return [obtener_nombre_usuario_actual()]
+            emp_data = emp.to_dict() or {}
+            nombre = emp_data.get("nombre") or emp_data.get("email")
+            if nombre and nombre not in nombres:
+                nombres.append(nombre)
+        return nombres or fallback
     except Exception:
-        return [obtener_nombre_usuario_actual()]
+        return fallback
 
 
 def cargar_datos_nube():
-    columnas_ing = ["Fecha", "Concepto", "Valor", "Responsable", "Observaciones", "ID"]
-    columnas_gas = ["Fecha", "Concepto", "Categoría", "Valor", "Responsable", "ID"]
-    st.session_state.ingresos_df = pd.DataFrame(columns=columnas_ing)
-    st.session_state.gastos_df = pd.DataFrame(columns=columnas_gas)
     if not db:
         return
     institucion_id = get_institucion_id()
@@ -450,16 +409,18 @@ def cargar_datos_nube():
 
         ing_docs = base_ref.collection('ingresos').stream()
         ing_data = [doc.to_dict() for doc in ing_docs]
-        gas_docs = base_ref.collection('gastos').stream()
-        gas_data = [doc.to_dict() for doc in gas_docs]
-
         if ing_data:
             st.session_state.ingresos_df = pd.DataFrame(ing_data)
+        else:
+            st.session_state.ingresos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Valor", "Responsable", "Observaciones", "ID"])
+
+        gas_docs = base_ref.collection('gastos').stream()
+        gas_data = [doc.to_dict() for doc in gas_docs]
         if gas_data:
             st.session_state.gastos_df = pd.DataFrame(gas_data)
+        else:
+            st.session_state.gastos_df = pd.DataFrame(columns=["Fecha", "Concepto", "Categoría", "Valor", "Responsable", "ID"])
     except Exception:
-        st.session_state.ingresos_df = pd.DataFrame(columns=columnas_ing)
-        st.session_state.gastos_df = pd.DataFrame(columns=columnas_gas)
         st.sidebar.error("Error al sincronizar con la nube.")
 
 
@@ -470,7 +431,7 @@ def guardar_registro_nube(coleccion, datos):
     if not institucion_id:
         return False
     try:
-        db.collection('usuarios').document(institucion_id).collection(coleccion).document(datos['ID']).set(datos)
+        db.collection("usuarios").document(institucion_id).collection(coleccion).document(datos["ID"]).set(datos)
         return True
     except Exception:
         return False
@@ -483,52 +444,86 @@ def eliminar_registro_nube(coleccion, doc_id):
     if not institucion_id:
         return False
     try:
-        db.collection('usuarios').document(institucion_id).collection(coleccion).document(doc_id).delete()
+        db.collection("usuarios").document(institucion_id).collection(coleccion).document(doc_id).delete()
         return True
     except Exception:
         return False
+
+
+def generar_id(prefijo):
+    return f"{prefijo}-{uuid.uuid4().hex.upper()}"
+
+
+def prefijo_storage_empresa():
+    institucion_id = get_institucion_id()
+    if not institucion_id:
+        return None
+    hash_empresa = hashlib.sha256(institucion_id.encode("utf-8")).hexdigest()[:32]
+    return f"empresas/{hash_empresa}"
+
+
+def subir_evidencia_comprobante(datos_bytes, nombre_archivo, mime_type):
+    if not bucket:
+        raise RuntimeError(
+            "Cloud Storage no está configurado. Define firebase.storage_bucket con el nombre exacto del bucket que aparece en Firebase Console > Storage."
+        )
+    prefijo = prefijo_storage_empresa()
+    if not prefijo:
+        raise RuntimeError("No se pudo identificar la empresa para guardar el comprobante.")
+    extension = os.path.splitext(nombre_archivo)[1].lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,8}", extension):
+        extension = ".bin"
+    ruta = f"{prefijo}/comprobantes/{uuid.uuid4().hex}{extension}"
+    blob = bucket.blob(ruta)
+    blob.upload_from_string(datos_bytes, content_type=mime_type or "application/octet-stream")
+    return ruta
+
+
+def descargar_evidencia_comprobante(ruta):
+    if not bucket or not ruta:
+        return None
+    prefijo = prefijo_storage_empresa()
+    if not prefijo or not ruta.startswith(prefijo + "/"):
+        return None
+    return bucket.blob(ruta).download_as_bytes()
+
+
+def guardar_pendiente_movimiento(tipo, registro, motivos=None, origen="Manual", evidencia_ruta=None, evidencia_nombre=None, evidencia_mime=None):
+    if not db:
+        return None
+    institucion_id = get_institucion_id()
+    if not institucion_id:
+        return None
+    tipo_limpio = "Ingreso" if str(tipo).lower().startswith("ing") else "Gasto"
+    pendiente_id = generar_id("PEND-ING" if tipo_limpio == "Ingreso" else "PEND-GAS")
+    pendiente = dict(registro)
+    pendiente.update({
+        "ID": pendiente_id,
+        "Tipo": tipo_limpio,
+        "Motivos": motivos or ["Enviado para revisión humana."],
+        "Estado": "Pendiente",
+        "Origen": origen,
+        "creado_por": (st.session_state.get("user_data") or {}).get("email", ""),
+        "creado_en": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
+    })
+    if evidencia_ruta:
+        pendiente["EvidenciaStoragePath"] = evidencia_ruta
+        pendiente["EvidenciaNombre"] = evidencia_nombre or "comprobante"
+        pendiente["EvidenciaMime"] = evidencia_mime or "application/octet-stream"
+    coleccion = "ingresos_pendientes" if tipo_limpio == "Ingreso" else "gastos_pendientes"
+    try:
+        db.collection("usuarios").document(institucion_id).collection(coleccion).document(pendiente_id).set(pendiente)
+        return pendiente_id
+    except Exception:
+        if evidencia_ruta and bucket:
+            try:
+                bucket.blob(evidencia_ruta).delete()
+            except Exception:
+                pass
+        return None
 
 
 CATEGORIAS_GASTO = ["Logística", "Publicidad", "Alimentación", "Varios"]
-
-
-def cargar_presupuesto_general():
-    hoy = dt_module.date.today()
-    valores = {
-        "monto": 0.0,
-        "fecha_inicio": hoy.isoformat(),
-        "fecha_fin": (hoy + dt_module.timedelta(days=30)).isoformat(),
-        "configurado": False,
-    }
-    empresa_id = get_institucion_id()
-    if not db or not empresa_id:
-        return valores
-    try:
-        datos = db.collection("usuarios").document(empresa_id).get().to_dict() or {}
-        guardado = datos.get("presupuesto_general")
-        if isinstance(guardado, dict):
-            valores.update(guardado)
-            valores["configurado"] = True
-    except Exception:
-        pass
-    return valores
-
-
-def guardar_presupuesto_general(monto, fecha_inicio, fecha_fin):
-    empresa_id = get_institucion_id()
-    if not db or not empresa_id:
-        return False
-    try:
-        db.collection("usuarios").document(empresa_id).set({
-            "presupuesto_general": {
-                "monto": float(monto),
-                "fecha_inicio": fecha_inicio.isoformat(),
-                "fecha_fin": fecha_fin.isoformat(),
-            }
-        }, merge=True)
-        return True
-    except Exception:
-        return False
 
 
 def cargar_presupuestos_categoria():
@@ -550,14 +545,59 @@ def cargar_presupuestos_categoria():
 
 def guardar_presupuestos_categoria(presupuestos: dict):
     if not db:
-        return False
+        return
     institucion_id = get_institucion_id()
     if not institucion_id:
-        return False
+        return
     try:
         db.collection('usuarios').document(institucion_id).set(
             {'presupuestos_categoria': presupuestos}, merge=True
         )
+    except Exception:
+        pass
+
+
+def cargar_configuracion_presupuesto():
+    hoy = dt_module.date.today()
+    default = {
+        "presupuesto_tope": 500000.0,
+        "fecha_inicio_presupuesto": hoy.isoformat(),
+        "fecha_fin_presupuesto": (hoy + dt_module.timedelta(days=30)).isoformat(),
+    }
+    if not db:
+        return default
+    institucion_id = get_institucion_id()
+    if not institucion_id:
+        return default
+    try:
+        datos = db.collection("usuarios").document(institucion_id).get().to_dict() or {}
+        valor = float(datos.get("presupuesto_tope", default["presupuesto_tope"]))
+        inicio = datos.get("fecha_inicio_presupuesto", default["fecha_inicio_presupuesto"])
+        fin = datos.get("fecha_fin_presupuesto", default["fecha_fin_presupuesto"])
+        dt_module.date.fromisoformat(inicio)
+        dt_module.date.fromisoformat(fin)
+        return {
+            "presupuesto_tope": max(0.0, valor),
+            "fecha_inicio_presupuesto": inicio,
+            "fecha_fin_presupuesto": fin,
+        }
+    except Exception:
+        return default
+
+
+def guardar_configuracion_presupuesto(presupuesto_tope, periodo):
+    if not db or not get_institucion_id():
+        return False
+    if not isinstance(periodo, tuple) or len(periodo) != 2:
+        return False
+    inicio, fin = periodo
+    datos = {
+        "presupuesto_tope": float(presupuesto_tope),
+        "fecha_inicio_presupuesto": inicio.isoformat(),
+        "fecha_fin_presupuesto": fin.isoformat(),
+    }
+    try:
+        db.collection("usuarios").document(get_institucion_id()).set(datos, merge=True)
         return True
     except Exception:
         return False
@@ -728,53 +768,85 @@ def extraer_datos_ingreso_gemini(archivo_bytes, mime_type, api_key):
         return None
 
 
-def extraer_datos_comprobante_gemini(archivo_bytes, mime_type, api_key):
-    """Clasifica un comprobante y extrae sus campos en una sola llamada de IA."""
+def extraer_datos_comprobante_gemini(archivo_bytes, mime_type, nombre_archivo, api_key):
+    """Clasifica un comprobante como ingreso o gasto y extrae sus datos editables."""
+    client = None
+    archivo_remoto = None
+    ruta_temporal = None
     try:
         from google import genai
         from google.genai import types
         import json as json_lib
 
-        cliente = genai.Client(api_key=api_key)
-        instrucciones = (
-            "Analiza este comprobante financiero en español. Decide si documenta un dinero "
-            "recibido por la empresa (ingreso) o un pago realizado por la empresa (gasto). "
-            "Devuelve solamente JSON válido, sin Markdown, con las claves: tipo (ingreso o gasto), "
-            "concepto, valor (número COP sin separadores, null si no es legible), fecha (YYYY-MM-DD o null), "
-            "observaciones, categoria_sugerida (una de Logística, Publicidad, Alimentación, Varios), "
-            "numero_factura. Si no puedes clasificarlo con seguridad, usa tipo ingreso solo cuando el "
-            "documento muestre claramente dinero recibido; en los demás casos usa gasto."
+        extension = os.path.splitext(nombre_archivo)[1] or ".bin"
+        if mime_type == "application/pdf" and len(archivo_bytes) > 50 * 1024 * 1024:
+            raise ValueError("Gemini acepta PDF de hasta 50 MB por comprobante.")
+        if len(archivo_bytes) > 200 * 1024 * 1024:
+            raise ValueError("El límite de esta aplicación es 200 MB por archivo.")
+
+        client = genai.Client(api_key=api_key)
+        prompt = (
+            "Analiza el comprobante adjunto y clasifícalo como un movimiento financiero de una empresa. "
+            "Puede ser un recibo de compra o servicio (Gasto), o evidencia de dinero recibido (Ingreso), "
+            "incluyendo comprobantes de Nequi, bancos, transferencias, consignaciones, supermercados, "
+            "facturas, recibos y pagos. No inventes datos: si no son legibles usa null. "
+            "Interpreta el valor en pesos colombianos y la fecha del documento. "
+            "Para gastos elige exactamente una categoría: Logística, Publicidad, Alimentación, Varios. "
+            "Devuelve solo JSON válido con exactamente estas claves: "
+            '{"tipo":"Ingreso, Gasto o Indeterminado","concepto":"texto breve","valor":numero_o_null,'
+            '"fecha":"YYYY-MM-DD o null","categoria_sugerida":"una categoría exacta o null",'
+            '"observaciones":"referencia, pagador o comercio visible, o null",'
+            '"numero_factura":"folio visible o null"}.'
         )
-        respuesta = cliente.models.generate_content(
-            model="gemini-3.6-flash",
-            contents=[types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type), instrucciones],
-        )
-        texto = (respuesta.text or "").strip()
-        if texto.startswith("```"):
-            texto = texto.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        extraidos = json_lib.loads(texto)
-        if not isinstance(extraidos, dict):
-            return None
-        extraidos["tipo"] = "ingreso" if str(extraidos.get("tipo", "")).strip().lower() == "ingreso" else "gasto"
-        return extraidos
+        if len(archivo_bytes) <= 20 * 1024 * 1024:
+            parte_archivo = types.Part.from_bytes(data=archivo_bytes, mime_type=mime_type)
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=[parte_archivo, prompt],
+            )
+        else:
+            with tempfile.NamedTemporaryFile(suffix=extension, delete=False) as temporal:
+                temporal.write(archivo_bytes)
+                ruta_temporal = temporal.name
+            archivo_remoto = client.files.upload(file=ruta_temporal)
+            response = client.models.generate_content(
+                model="gemini-3.6-flash",
+                contents=[archivo_remoto, prompt],
+            )
+
+        texto = (response.text or "").strip()
+        fence = chr(96) * 3
+        if texto.startswith(fence + "json"):
+            texto = texto[len(fence + "json"):].strip()
+        elif texto.startswith(fence):
+            texto = texto[3:].strip()
+        if texto.endswith(fence):
+            texto = texto[:-3].strip()
+        datos = json_lib.loads(texto)
+        tipo = str(datos.get("tipo") or "Indeterminado").strip().lower()
+        if tipo in {"ingreso", "abono", "depósito", "deposito"}:
+            datos["tipo"] = "Ingreso"
+        elif tipo in {"gasto", "compra", "egreso", "pago"}:
+            datos["tipo"] = "Gasto"
+        else:
+            datos["tipo"] = "Indeterminado"
+        categoria = datos.get("categoria_sugerida")
+        datos["categoria_sugerida"] = categoria if categoria in CATEGORIAS_GASTO else "Varios"
+        return datos
     except Exception as e:
-        st.error(f"No se pudo analizar el comprobante: {e}")
+        st.error(f"No se pudo analizar {nombre_archivo}: {e}")
         return None
-
-
-def guardar_comprobante_nube(nombre, mime_type, archivo_bytes, registro_id):
-    """Guarda el original bajo la carpeta de la empresa en Firebase Storage."""
-    empresa_id = get_institucion_id()
-    if not bucket or not empresa_id:
-        return None
-    try:
-        nombre_limpio = os.path.basename(nombre).replace("\\", "_").replace("/", "_")
-        ruta = f"empresas/{empresa_id}/comprobantes/{registro_id}_{nombre_limpio}"
-        blob = bucket.blob(ruta)
-        blob.upload_from_string(archivo_bytes, content_type=mime_type)
-        return ruta
-    except Exception:
-        return None
+    finally:
+        if client and archivo_remoto:
+            try:
+                client.files.delete(name=archivo_remoto.name)
+            except Exception:
+                pass
+        if ruta_temporal and os.path.exists(ruta_temporal):
+            try:
+                os.remove(ruta_temporal)
+            except Exception:
+                pass
 
 
 def detectar_anomalias_ingreso(nuevo_valor, nueva_fecha, nuevo_concepto, ingresos_existentes_df):
@@ -811,42 +883,50 @@ def detectar_anomalias_ingreso(nuevo_valor, nueva_fecha, nuevo_concepto, ingreso
 
 
 def calcular_relacion_presupuesto(total_ingresos, total_gastos, presupuesto_tope):
-    """Resume ingresos, gastos, saldo y uso del límite, sin bloquear ingresos."""
+    """Muestra cobertura de ingresos y ejecución de gastos contra el presupuesto."""
     total_ingresos = float(total_ingresos or 0)
     total_gastos = float(total_gastos or 0)
     presupuesto_tope = float(presupuesto_tope or 0)
     saldo = total_ingresos - total_gastos
-    if not presupuesto_tope or presupuesto_tope <= 0:
-        return {"nivel": "sin_presupuesto", "mensaje": "Aún no se ha configurado un presupuesto general para esta empresa.", "saldo": saldo, "porcentaje_ingresos": 0.0, "porcentaje_gastado": 0.0}
-
+    if presupuesto_tope <= 0:
+        return {
+            "nivel": "sin_presupuesto",
+            "mensaje": "Configura un presupuesto para mostrar cuánto cubren los ingresos y cuánto se ha ejecutado.",
+            "saldo": saldo,
+            "porcentaje_cubierto": 0.0,
+        }
     porcentaje_gastado = (total_gastos / presupuesto_tope) * 100
-    porcentaje_ingresos = (total_ingresos / presupuesto_tope) * 100
-    porcentaje_cubierto_gastos = (total_ingresos / total_gastos) * 100 if total_gastos > 0 else 0.0
-    texto_cobertura = (
-        f"Los ingresos cubren el {porcentaje_cubierto_gastos:.0f}% de los gastos registrados."
-        if total_gastos > 0 else "Aún no hay gastos registrados para comparar con los ingresos."
-    )
-
+    porcentaje_cubierto = (total_ingresos / presupuesto_tope) * 100
+    faltante_ingresos = max(0.0, presupuesto_tope - total_ingresos)
+    disponible_gasto = presupuesto_tope - total_gastos
     if porcentaje_gastado >= 100:
         nivel = "critico"
-        mensaje = f"Los gastos superan el límite en ${total_gastos - presupuesto_tope:,.0f}. Los ingresos equivalen al {porcentaje_ingresos:.0f}% del presupuesto. {texto_cobertura}"
+        mensaje = (
+            f"Los gastos superan el límite de {presupuesto_tope:,.0f} COP. "
+            f"Los ingresos registrados cubren el {porcentaje_cubierto:.0f}% del presupuesto."
+        )
     elif porcentaje_gastado >= 80:
         nivel = "alerta"
-        mensaje = f"Se ha usado el {porcentaje_gastado:.0f}% del límite (${presupuesto_tope - total_gastos:,.0f} disponibles). Los ingresos equivalen al {porcentaje_ingresos:.0f}% del presupuesto. {texto_cobertura}"
+        mensaje = (
+            f"Se ha usado el {porcentaje_gastado:.0f}% del límite de gastos; "
+            f"quedan {disponible_gasto:,.0f} COP. Los ingresos cubren el {porcentaje_cubierto:.0f}%."
+        )
     else:
+        mensaje = (
+            f"Los ingresos registrados cubren el {porcentaje_cubierto:.0f}% del presupuesto de gastos; "
+            f"quedan {faltante_ingresos:,.0f} COP para que los ingresos registrados igualen el presupuesto. "
+            f"Se ha usado el {porcentaje_gastado:.0f}% del límite."
+        )
         nivel = "ok"
-        mensaje = f"Se ha usado el {porcentaje_gastado:.0f}% del límite. Los ingresos equivalen al {porcentaje_ingresos:.0f}% del presupuesto. {texto_cobertura}"
-
-    return {"nivel": nivel, "mensaje": mensaje, "saldo": saldo, "porcentaje_ingresos": porcentaje_ingresos, "porcentaje_gastado": porcentaje_gastado}
-
-
-def filtrar_movimientos_periodo(df, periodo):
-    """Filtra un registro por las fechas inclusivas del presupuesto activo."""
-    if df is None or df.empty or not isinstance(periodo, tuple) or len(periodo) != 2 or "Fecha" not in df.columns:
-        return df.copy() if df is not None else pd.DataFrame()
-    copia = df.copy()
-    fechas = pd.to_datetime(copia["Fecha"], errors="coerce").dt.date
-    return copia.loc[fechas.ge(periodo[0]) & fechas.le(periodo[1])].copy()
+    return {
+        "nivel": nivel,
+        "mensaje": mensaje,
+        "saldo": saldo,
+        "porcentaje_cubierto": porcentaje_cubierto,
+        "porcentaje_gastado": porcentaje_gastado,
+        "faltante_ingresos": faltante_ingresos,
+        "disponible_gasto": disponible_gasto,
+    }
 
 
 # =====================================================================================
@@ -875,7 +955,7 @@ def registrar_auditoria(accion, detalle=""):
         log_entry = {
             "fecha_hora": dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
             "usuario": usuario_nombre,
-            "institucion": obtener_nombre_empresa(),
+            "institucion": usuario_nombre,
             "accion": accion,
             "detalle": detalle,
         }
@@ -1023,7 +1103,6 @@ def procesar_callback_google():
             user_ref.set(user_data)
 
         st.session_state.logged_in = True
-        limpiar_datos_privados_sesion()
         st.session_state.user_data = user_data
         st.query_params.clear()
         cargar_datos_nube()
@@ -1050,10 +1129,9 @@ def generar_miniatura_pdf(file_bytes):
 
 # --- FUNCIÓN PARA GENERAR IMAGEN DE RECIBO DECORADA ---
 def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil, nombre_empresa):
-    img_w, img_h = 650, 880
+    img_w, img_h = 650, 940
     base_img = Image.new("RGB", (img_w, img_h), color="#FFFFFF")
     draw = ImageDraw.Draw(base_img)
-
     try:
         font_title = ImageFont.truetype("arial.ttf", 22)
         font_bold = ImageFont.truetype("arialbd.ttf", 15)
@@ -1063,47 +1141,37 @@ def generar_imagen_recibo(rec_id, fecha, tot_ing, tot_gas, saldo, qr_img_pil, no
         font_title = font_bold = font_regular = font_small = ImageFont.load_default()
 
     draw.rectangle([(0, 0), (img_w, 110)], fill="#1E3A8A")
-    nombre_empresa = str(nombre_empresa or "Empresa")[:42]
-    draw.text((30, 25), nombre_empresa, fill="#FFFFFF", font=font_title)
-    draw.text((30, 60), "Comprobante General de Balance Financiero", fill="#93C5FD", font=font_regular)
+    draw.text((30, 25), "COMPROBANTE FINANCIERO", fill="#FFFFFF", font=font_title)
+    draw.text((30, 60), "Resumen de movimientos de la empresa", fill="#93C5FD", font=font_regular)
+    draw.rectangle([(30, 130), (img_w - 30, img_h - 35)], outline="#E2E8F0", width=2, fill="#F8FAFC")
+    draw.text((55, 160), "ID de comprobante:", fill="#64748B", font=font_small)
+    draw.text((200, 158), rec_id, fill="#1E293B", font=font_bold)
+    draw.text((55, 190), "Fecha de emisión:", fill="#64748B", font=font_small)
+    draw.text((200, 188), fecha, fill="#1E293B", font=font_bold)
+    draw.text((55, 220), "Empresa:", fill="#64748B", font=font_small)
 
-    draw.rectangle([(30, 130), (img_w - 30, img_h - 40)], outline="#E2E8F0", width=2, fill="#F8FAFC")
-
-    draw.text((55, 160), "ID de Comprobante:", fill="#64748B", font=font_small)
-    draw.text((200, 158), f"{rec_id}", fill="#1E293B", font=font_bold)
-
-    draw.text((55, 190), "Fecha de Emisión:", fill="#64748B", font=font_small)
-    draw.text((200, 188), f"{fecha}", fill="#1E293B", font=font_bold)
-
-    draw.text((55, 220), "Institución:", fill="#64748B", font=font_small)
-    draw.text((200, 218), nombre_empresa, fill="#1E293B", font=font_bold)
+    nombre_visual = str(nombre_empresa or "Empresa")
+    while nombre_visual and draw.textbbox((0, 0), nombre_visual, font=font_bold)[2] > img_w - 255:
+        nombre_visual = nombre_visual[:-2] + "…"
+    draw.text((200, 218), nombre_visual, fill="#1E293B", font=font_bold)
 
     draw.line([(55, 255), (img_w - 55, 255)], fill="#CBD5E1", width=1)
-
     draw.text((55, 280), "RESUMEN DE MOVIMIENTOS", fill="#1E3A8A", font=font_bold)
-
-    draw.text((55, 320), "(+) Total Ingresos:", fill="#334155", font=font_regular)
-    draw.text((400, 320), f"${tot_ing:,.0f} COP", fill="#059669", font=font_bold)
-
-    draw.text((55, 360), "(-) Total Gastos:", fill="#334155", font=font_regular)
-    draw.text((400, 360), f"${tot_gas:,.0f} COP", fill="#DC2626", font=font_bold)
-
+    draw.text((55, 320), "(+) Total ingresos:", fill="#334155", font=font_regular)
+    draw.text((400, 320), f"{chr(36)}{tot_ing:,.0f} COP", fill="#059669", font=font_bold)
+    draw.text((55, 360), "(-) Total gastos:", fill="#334155", font=font_regular)
+    draw.text((400, 360), f"{chr(36)}{tot_gas:,.0f} COP", fill="#DC2626", font=font_bold)
     draw.line([(55, 400), (img_w - 55, 400)], fill="#CBD5E1", width=1)
-
-    draw.text((55, 420), "BALANCE NETO FINAL:", fill="#1E3A8A", font=font_bold)
+    draw.text((55, 420), "BALANCE NETO:", fill="#1E3A8A", font=font_bold)
     color_saldo = "#059669" if saldo >= 0 else "#DC2626"
-    draw.text((370, 415), f"${saldo:,.0f} COP", fill=color_saldo, font=font_title)
+    draw.text((370, 415), f"{chr(36)}{saldo:,.0f} COP", fill=color_saldo, font=font_title)
+    draw.text((55, 465), "ESTADO: SUPERÁVIT" if saldo >= 0 else "ESTADO: DÉFICIT", fill=color_saldo, font=font_small)
 
-    estado_txt = "ESTADO: APROBADO (SUPERÁVIT)" if saldo >= 0 else "ESTADO: ALERTA (DÉFICIT)"
-    draw.text((55, 465), estado_txt, fill=color_saldo, font=font_small)
-
-    qr_resized = qr_img_pil.resize((180, 180))
-    base_img.paste(qr_resized, (int((img_w - 180) / 2), 510))
-
-    draw.text((int(img_w / 2) - 130, 710), "Escanea este código QR para validar", fill="#64748B", font=font_small)
-    draw.text((int(img_w / 2) - 120, 730), "la información general del balance", fill="#64748B", font=font_small)
-
-    draw.text((int(img_w / 2) - 110, 800), "Sistema Automático de Gestión Financiera", fill="#94A3B8", font=font_small)
+    qr_resized = qr_img_pil.resize((250, 250))
+    base_img.paste(qr_resized, (200, 490))
+    draw.text((int(img_w / 2) - 135, 760), "Escanea el QR para descargar este PNG", fill="#64748B", font=font_small)
+    draw.text((int(img_w / 2) - 132, 782), "El enlace se puede revocar desde Firebase Storage", fill="#64748B", font=font_small)
+    draw.text((int(img_w / 2) - 120, 875), "Sistema de Gestión Financiera", fill="#94A3B8", font=font_small)
 
     buffer_img = BytesIO()
     base_img.save(buffer_img, format="PNG")
@@ -1192,7 +1260,7 @@ def generar_reporte_pdf_corporativo(nombre_institucion, df_ingresos, df_gastos, 
     story.append(PageBreak())
     story.append(Paragraph("Detalle de Ingresos", estilo_seccion))
     if not df_ingresos.empty:
-        columnas_ing = [c for c in df_ingresos.columns if c not in ("ID", "Ruta_Archivo")]
+        columnas_ing = [c for c in df_ingresos.columns if c != "ID"]
         filas_ing = [columnas_ing] + df_ingresos[columnas_ing].astype(str).values.tolist()
         tabla_ing = Table(filas_ing, repeatRows=1)
         tabla_ing.setStyle(_estilo_tabla_corporativo())
@@ -1203,7 +1271,7 @@ def generar_reporte_pdf_corporativo(nombre_institucion, df_ingresos, df_gastos, 
     story.append(Spacer(1, 16))
     story.append(Paragraph("Detalle de Gastos", estilo_seccion))
     if not df_gastos.empty:
-        columnas_gas = [c for c in df_gastos.columns if c not in ("ID", "Ruta_Archivo")]
+        columnas_gas = [c for c in df_gastos.columns if c != "ID"]
         filas_gas = [columnas_gas] + df_gastos[columnas_gas].astype(str).values.tolist()
         tabla_gas = Table(filas_gas, repeatRows=1)
         tabla_gas.setStyle(_estilo_tabla_corporativo())
@@ -1226,49 +1294,147 @@ def generar_reporte_pdf_corporativo(nombre_institucion, df_ingresos, df_gastos, 
 
 # --- PANTALLAS DE AUTENTICACIÓN ---
 if not st.session_state.logged_in:
-    # Procesa el retorno de Google (si Google acaba de redirigir con ?code=...)
-    # ANTES de dibujar el formulario, para que si ya hay sesión válida no se
-    # muestre el login de nuevo.
+    login_oscuro = st.session_state.get("modo_oscuro", False)
+    login_fondo = "#0B1220" if login_oscuro else "#F2F5FA"
+    login_superficie = "#111C2E" if login_oscuro else "#FFFFFF"
+    login_borde = "#2B3B52" if login_oscuro else "#DCE4EF"
+    login_texto = "#E8EEF7" if login_oscuro else "#17243A"
+    login_secundario = "#A8B6C9" if login_oscuro else "#66758B"
+    login_acento = "#6EA8FE" if login_oscuro else "#2457C5"
+    login_acento_hover = "#3B82F6" if login_oscuro else "#3977E8"
+    st.markdown(
+        f"""<style>
+        [data-testid="stAppViewContainer"] {{
+            background: radial-gradient(ellipse at 50% 0%, {'rgba(59,130,246,.17)' if login_oscuro else 'rgba(37,99,235,.10)'}, transparent 48%),
+                        {login_fondo} !important;
+        }}
+        [data-testid="stHeader"], [data-testid="stToolbar"] {{ background: transparent !important; }}
+        [data-testid="stMainBlockContainer"] {{
+            max-width: 610px !important; padding: 1.6rem clamp(1rem, 3vw, 2.2rem) 3rem !important;
+        }}
+        .auth-brand {{ text-align:center; margin: .3rem 0 1.8rem; }}
+        .auth-brand img {{ width:94px; height:94px; object-fit:contain; margin-bottom:.55rem; }}
+        .auth-brand-title {{ color:{login_texto}; font-size:1.65rem; line-height:1.2; font-weight:750; letter-spacing:-.04em; }}
+        .auth-brand-subtitle {{ color:{login_secundario}; font-size:.98rem; margin-top:.48rem; }}
+        .auth-kicker {{ color:{login_acento}; font-size:.72rem; font-weight:800; letter-spacing:.13em; margin:0 0 .45rem; }}
+        .auth-heading {{ color:{login_texto}; font-size:1.4rem; line-height:1.25; font-weight:720; letter-spacing:-.025em; margin:0 0 .35rem; }}
+        .auth-description {{ color:{login_secundario}; font-size:.94rem; line-height:1.55; margin:0 0 1.15rem; }}
+        .auth-divider {{ display:flex; align-items:center; gap:.8rem; color:{login_secundario}; font-size:.72rem; font-weight:700; letter-spacing:.1em; margin:1.05rem 0; }}
+        .auth-divider:before, .auth-divider:after {{ content:""; height:1px; flex:1; background:{login_borde}; }}
+        [data-testid="stForm"] {{
+            background:{login_superficie} !important; border:1px solid {login_borde} !important;
+            border-radius:18px !important; padding:1.25rem 1.35rem 1.3rem !important;
+            box-shadow:0 18px 48px rgba(15,23,42,{'0.27' if login_oscuro else '0.08'}) !important;
+        }}
+        [data-testid="stTextInput"] label {{ color:{login_texto} !important; font-weight:650 !important; }}
+        [data-testid="stTextInput"] input {{
+            min-height:46px !important; border-radius:10px !important;
+            background:{login_fondo} !important; border-color:{login_borde} !important;
+            color:{login_texto} !important; transition:border-color .18s, box-shadow .18s;
+        }}
+        [data-testid="stTextInput"] input:focus {{
+            border-color:{login_acento} !important; box-shadow:0 0 0 3px {'rgba(110,168,254,.18)' if login_oscuro else 'rgba(36,87,197,.13)'} !important;
+        }}
+        [data-testid="stFormSubmitButton"] button {{
+            min-height:47px; width:100%; border:0 !important; border-radius:10px !important;
+            background:linear-gradient(135deg, {login_acento}, {login_acento_hover}) !important;
+            color:#FFFFFF !important; font-weight:750 !important; transition:transform .18s, box-shadow .18s;
+            box-shadow:0 8px 19px {'rgba(59,130,246,.25)' if login_oscuro else 'rgba(36,87,197,.19)'} !important;
+        }}
+        [data-testid="stFormSubmitButton"] button:hover {{ transform:translateY(-1px); box-shadow:0 11px 24px rgba(37,99,235,.24) !important; }}
+        [data-testid="stLinkButton"] a {{
+            min-height:47px; border-radius:10px !important; border:1px solid {login_borde} !important;
+            background:{login_superficie} !important; color:{login_texto} !important;
+            font-weight:650 !important; transition:border-color .18s, box-shadow .18s, transform .18s;
+            box-shadow:0 3px 10px rgba(15,23,42,.04);
+        }}
+        [data-testid="stLinkButton"] a:hover {{ border-color:{login_acento} !important; transform:translateY(-1px); }}
+        [data-testid="stLinkButton"] a > div {{ width:auto !important; flex:0 0 auto !important; }}
+        [data-testid="stLinkButton"] a p {{ margin:0 !important; }}
+        [data-testid="stButton"] button[kind="secondary"] {{
+            background:transparent !important; border:0 !important; box-shadow:none !important;
+            color:{login_acento} !important; font-weight:650 !important; padding:.35rem .2rem !important;
+        }}
+        [data-testid="stButton"] button[kind="secondary"]:hover {{ color:{login_acento_hover} !important; text-decoration:underline; }}
+        [data-testid="stAlert"] {{ border-radius:12px !important; }}
+        @media (max-width:600px) {{
+            [data-testid="stMainBlockContainer"] {{ padding:1rem .9rem 2rem !important; }}
+            [data-testid="stForm"] {{ padding:1rem !important; border-radius:14px !important; }}
+            .auth-brand {{ margin-bottom:1.35rem; }}
+            .auth-brand img {{ width:78px; height:78px; }}
+            .auth-brand-title {{ font-size:1.4rem; }}
+        }}
+        </style>""",
+        unsafe_allow_html=True,
+    )
+
     procesar_callback_google()
+
+    auth_vista = st.session_state.get("auth_vista", "login")
+    if auth_vista not in {"login", "crear_cuenta", "recuperar"}:
+        auth_vista = "login"
+        st.session_state.auth_vista = auth_vista
 
     if LOGO_PATH.is_file():
         logo_b64 = base64.b64encode(LOGO_PATH.read_bytes()).decode("ascii")
+        logo_marca = f'<img src="data:image/png;base64,{logo_b64}" alt="Logo de Gestión Financiera">'
+    else:
+        logo_marca = '<div style="font-size:3rem; margin-bottom:.5rem;">◈</div>'
+    st.markdown(
+        f'<div class="auth-brand">{logo_marca}'
+        '<div class="auth-brand-title">Gestión Financiera Empresarial</div>'
+        '<div class="auth-brand-subtitle">Control claro y seguro para tu organización</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    mensaje_auth = st.session_state.pop("auth_flash", None)
+    if mensaje_auth:
+        st.success(mensaje_auth)
+
+    def cambiar_vista_auth(vista):
+        st.session_state.auth_vista = vista
+
+    if auth_vista == "login":
         st.markdown(
-            f'<div style="display:flex; justify-content:center; margin:0.5rem 0 1rem;">'
-            f'<img src="data:image/png;base64,{logo_b64}" alt="Logo financiero" '
-            f'style="width:150px; max-width:35vw; height:auto;">'
-            f'</div>',
+            '<div class="auth-kicker">ACCESO SEGURO</div>'
+            '<div class="auth-heading">Inicia sesión</div>'
+            '<div class="auth-description">Accede al espacio financiero de tu empresa.</div>',
             unsafe_allow_html=True,
         )
 
-    st.markdown('<p class="main-header" style="text-align: center;">Portal Financiero Institucional</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header" style="text-align: center;">Finanzas y control para organizaciones</p>', unsafe_allow_html=True)
-
-    tab1, tab2, tab3 = st.tabs(["Iniciar Sesión", "Crear Cuenta", "Olvidé mi Contraseña"])
-
-    with tab1:
-        st.markdown("### Acceso con Credenciales")
-
-        # --- Botón de Google (Requisito 3) ---
         if GOOGLE_OAUTH_DISPONIBLE:
             url_google = construir_url_login_google()
-            # st.link_button es el widget nativo de Streamlit para navegación externa.
-            # Un <a href> metido a mano vía st.markdown puede quedar interceptado por el
-            # manejo de clics propio de Streamlit (clic izquierdo normal no navega, aunque
-            # "abrir en pestaña nueva" sí funciona) — este widget evita ese problema.
-            st.link_button("🔵 Iniciar sesión con Google", url_google, use_container_width=True)
-            st.markdown("<p style='text-align:center; color:#94A3B8; font-size:0.85rem;'>— o con tu correo y contraseña —</p>", unsafe_allow_html=True)
+            google_logo_svg = (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">'
+                '<path fill="#4285F4" d="M43.6 20.1H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8v8c11 0 20-9 20-20 0-1.3-.1-2.6-.4-3.9z"/>'
+                '<path fill="#34A853" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.1 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.6 39.6 16.2 44 24 44z"/>'
+                '<path fill="#FBBC05" d="M12.7 28.1l-6.5 5C4.8 30.3 4 27.3 4 24s.8-6.3 2.2-9.1l6.5 5C12.3 21.3 12 22.6 12 24s.3 2.7.7 4.1z"/>'
+                '<path fill="#EA4335" d="M24 12c2.7 0 5.1.9 7.1 2.7l6.2-6.2C33.9 5 29.2 3 24 3 16.2 3 9.6 7.4 6.2 14.9l6.5 5C14.4 15.3 18.8 12 24 12z"/>'
+                '</svg>'
+            )
+            google_logo_data_uri = "data:image/svg+xml," + quote(google_logo_svg, safe="")
+            st.markdown(
+                f"""<style>
+                [data-testid="stLinkButton"] a {{ display:flex !important; align-items:center; justify-content:center; gap:.65rem; }}
+                [data-testid="stLinkButton"] a::before {{ content:""; display:inline-block; width:20px; height:20px; flex:0 0 20px; background:url('{google_logo_data_uri}') center / contain no-repeat; }}
+                </style>""",
+                unsafe_allow_html=True,
+            )
+            st.link_button("Continuar con Google", url_google, use_container_width=True)
         else:
-            st.caption("ℹ️ El login con Google no está configurado aún (faltan secrets [google_oauth]). Usa correo y contraseña.")
+            st.caption("El acceso con Google se habilitará cuando se configure para esta aplicación.")
 
+        st.markdown('<div class="auth-divider">O CONTINÚA CON TU CORREO</div>', unsafe_allow_html=True)
         with st.form("login_form_tradicional"):
-            email_login = st.text_input("Correo Electrónico")
-            pass_login = st.text_input("Contraseña", type="password")
-            submit_login = st.form_submit_button("Entrar")
+            email_login = st.text_input("Correo electrónico", placeholder="nombre@empresa.com")
+            pass_login = st.text_input("Contraseña", type="password", placeholder="Ingresa tu contraseña")
+            submit_login = st.form_submit_button("Iniciar sesión")
 
-            if submit_login and db:
+            if submit_login:
                 if not email_login or not pass_login:
-                    st.error("Por favor completa todos los campos.")
+                    st.error("Completa tu correo electrónico y contraseña.")
+                elif not db:
+                    st.error("No hay conexión con la base de datos. Intenta más tarde.")
                 else:
                     user_ref = db.collection("usuarios").document(email_login.lower().strip())
                     user_doc = user_ref.get()
@@ -1276,104 +1442,142 @@ if not st.session_state.logged_in:
                         user_data = user_doc.to_dict()
                         if verify_password(pass_login, user_data["password"]):
                             st.session_state.logged_in = True
-                            limpiar_datos_privados_sesion()
                             st.session_state.user_data = user_data
                             cargar_datos_nube()
-                            st.success("¡Bienvenido/a!")
                             st.rerun()
                         else:
-                            st.error("Contraseña incorrecta.")
+                            st.error("La contraseña no coincide. Revisa los datos e inténtalo de nuevo.")
                     else:
-                        st.error("No existe una cuenta registrada con este correo.")
+                        st.error("No encontramos una cuenta con ese correo electrónico.")
 
-    with tab2:
+        link_cols = st.columns(2)
+        with link_cols[0]:
+            st.button(
+                "¿Olvidaste tu contraseña?", key="auth_ir_recuperar", type="secondary",
+                use_container_width=True, on_click=cambiar_vista_auth, args=("recuperar",),
+            )
+        with link_cols[1]:
+            st.button(
+                "Crear cuenta", key="auth_ir_crear", type="secondary",
+                use_container_width=True, on_click=cambiar_vista_auth, args=("crear_cuenta",),
+            )
+
+    elif auth_vista == "crear_cuenta":
+        st.button(
+            "← Volver a iniciar sesión", key="auth_volver_desde_crear", type="secondary",
+            on_click=cambiar_vista_auth, args=("login",),
+        )
+        st.markdown(
+            '<div class="auth-kicker">NUEVA CUENTA</div>'
+            '<div class="auth-heading">Crea tu cuenta</div>'
+            '<div class="auth-description">Configura el acceso de tu organización. Si recibiste una invitación, usa el correo al que fue enviada.</div>',
+            unsafe_allow_html=True,
+        )
         with st.form("register_form"):
-            inst_name = st.text_input("Nombre de la Institución / Persona", help="Si tu correo fue invitado como empleado de una empresa, escribe aquí tu propio nombre.")
-            email_reg = st.text_input("Correo Electrónico")
-            pass_reg = st.text_input("Contraseña (Min. 6 caracteres, 1 mayúscula)", type="password")
-            submit_reg = st.form_submit_button("Registrar Cuenta")
+            inst_name = st.text_input("Nombre de la empresa o persona", placeholder="Ej. Acme S.A.S.")
+            email_reg = st.text_input("Correo electrónico", placeholder="nombre@empresa.com")
+            pass_reg = st.text_input("Contraseña", type="password", placeholder="Mínimo 6 caracteres y una mayúscula")
+            st.caption("Usa al menos 6 caracteres e incluye una letra mayúscula.")
+            submit_reg = st.form_submit_button("Crear cuenta")
 
-            if submit_reg and db:
+            if submit_reg:
                 if len(pass_reg) < 6 or not any(c.isupper() for c in pass_reg):
-                    st.error("La contraseña debe tener al menos 6 caracteres y 1 letra mayúscula.")
-                elif not inst_name or not email_reg:
-                    st.error("Todos los campos son obligatorios.")
+                    st.error("La contraseña debe tener al menos 6 caracteres y una letra mayúscula.")
+                elif not inst_name.strip() or not email_reg.strip():
+                    st.error("Completa todos los campos.")
+                elif not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email_reg.strip()):
+                    st.error("Escribe un correo electrónico válido.")
+                elif not db:
+                    st.error("No hay conexión con la base de datos. Intenta más tarde.")
                 else:
                     email_clean = email_reg.lower().strip()
-                    email_exists = db.collection('usuarios').document(email_clean).get().exists
-
+                    email_exists = db.collection("usuarios").document(email_clean).get().exists
                     if email_exists:
                         st.error("Ya existe una cuenta con este correo electrónico.")
                     else:
-                        # ¿Este correo fue invitado como empleado de alguna empresa?
-                        # Si sí, se vincula a esa empresa en vez de crear una nube nueva.
-                        invitacion_doc = db.collection('empleados_index').document(email_clean).get()
+                        invitacion_doc = db.collection("empleados_index").document(email_clean).get()
                         if invitacion_doc.exists:
                             invitacion = invitacion_doc.to_dict()
                             nuevo_usuario = {
-                                'institucion': inst_name,
-                                'email': email_clean,
-                                'password': hash_password(pass_reg),
-                                'rol': invitacion.get('rol', 'Analista'),
-                                'empresa_id': invitacion.get('empresa_id'),
-                                'fecha_creacion': dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                "institucion": inst_name.strip(),
+                                "email": email_clean,
+                                "password": hash_password(pass_reg),
+                                "rol": invitacion.get("rol", "Analista"),
+                                "empresa_id": invitacion.get("empresa_id"),
+                                "fecha_creacion": dt_module.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             }
-                            db.collection('usuarios').document(email_clean).set(nuevo_usuario)
-                            db.collection('usuarios').document(invitacion.get('empresa_id')).collection('empleados').document(email_clean).update({'nombre': inst_name, 'estado': 'Activo'})
-                            st.success(f"✅ ¡Cuenta creada! Quedaste vinculado a {invitacion.get('nombre_empresa', 'tu empresa')} como {invitacion.get('rol', 'Analista')}.")
+                            db.collection("usuarios").document(email_clean).set(nuevo_usuario)
+                            db.collection("usuarios").document(invitacion.get("empresa_id")).collection("empleados").document(email_clean).update({"nombre": inst_name.strip(), "estado": "Activo"})
+                            mensaje_registro = f"Cuenta creada. Ya estás vinculado a {invitacion.get('nombre_empresa', 'tu empresa')} como {invitacion.get('rol', 'Analista')}."
                         else:
                             nuevo_usuario = {
-                                'institucion': inst_name,
-                                'email': email_clean,
-                                'password': hash_password(pass_reg),
-                                'rol': 'Propietario',
-                                'empresa_id': email_clean,
-                                'fecha_creacion': dt_module.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                                "institucion": inst_name.strip(),
+                                "email": email_clean,
+                                "password": hash_password(pass_reg),
+                                "rol": "Propietario",
+                                "empresa_id": email_clean,
+                                "fecha_creacion": dt_module.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             }
-                            db.collection('usuarios').document(email_clean).set(nuevo_usuario)
-                            st.success("¡Cuenta creada exitosamente! Ya puedes iniciar sesión.")
+                            db.collection("usuarios").document(email_clean).set(nuevo_usuario)
+                            mensaje_registro = "Cuenta creada. Ya puedes iniciar sesión."
+                        st.session_state.auth_flash = mensaje_registro
+                        st.session_state.auth_vista = "login"
+                        st.rerun()
 
-    with tab3:
+    else:
+        st.button(
+            "← Volver a iniciar sesión", key="auth_volver_desde_recuperar", type="secondary",
+            on_click=cambiar_vista_auth, args=("login",),
+        )
+        st.markdown(
+            '<div class="auth-kicker">RECUPERACIÓN DE ACCESO</div>'
+            '<div class="auth-heading">Recupera tu contraseña</div>'
+            '<div class="auth-description">Te enviaremos una contraseña temporal al correo asociado a tu cuenta.</div>',
+            unsafe_allow_html=True,
+        )
         with st.form("forgot_form"):
-            st.info("Ingresa tu correo y te enviaremos una contraseña temporal de recuperación a tu bandeja.")
-            email_forgot = st.text_input("Correo Electrónico registrado")
-            submit_forgot = st.form_submit_button("Enviar Contraseña Temporal")
+            email_forgot = st.text_input("Correo electrónico registrado", placeholder="nombre@empresa.com")
+            submit_forgot = st.form_submit_button("Enviar contraseña temporal")
 
-            if submit_forgot and db:
+            if submit_forgot:
                 email_clean = email_forgot.lower().strip()
-                user_ref = db.collection('usuarios').document(email_clean)
-                user_doc = user_ref.get()
-                if user_doc.exists:
-                    temp_pass = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-                    user_ref.update({'password': hash_password(temp_pass)})
-
-                    try:
-                        remitente = st.secrets["smtp"]["email"]
-                        password_smtp = st.secrets["smtp"]["password"]
-
-                        msg = MIMEMultipart()
-                        msg['From'] = remitente
-                        msg['To'] = email_clean
-                        msg['Subject'] = "Recuperación de contraseña - Portal Financiero"
-
-                        cuerpo = f"Hola,\n\nHas solicitado recuperar tu contraseña en el Portal Financiero.\nTu nueva contraseña temporal es: {temp_pass}\n\nInicia sesión con ella y recuerda cambiarla."
-                        msg.attach(MIMEText(cuerpo, 'plain'))
-
-                        server = smtplib.SMTP('smtp.gmail.com', 587)
-                        server.starttls()
-                        server.login(remitente, password_smtp)
-                        server.sendmail(remitente, email_clean, msg.as_string())
-                        server.quit()
-
-                        st.success(f"✅ ¡Correo enviado exitosamente a {email_clean}! Revisa tu bandeja de entrada o spam.")
-                    except Exception as e:
-                        st.error(f"Error al enviar el correo. Asegúrate de configurar los secretos [smtp] en Streamlit. Detalle: {e}")
+                if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email_clean):
+                    st.error("Escribe un correo electrónico válido.")
+                elif not db:
+                    st.error("No hay conexión con la base de datos. Intenta más tarde.")
                 else:
-                    st.error("El correo no está registrado en nuestra base de datos.")
+                    user_ref = db.collection("usuarios").document(email_clean)
+                    user_doc = user_ref.get()
+                    if user_doc.exists:
+                        temp_pass = "".join(random.choices(string.ascii_letters + string.digits, k=8))
+                        user_ref.update({"password": hash_password(temp_pass)})
+                        try:
+                            remitente = st.secrets["smtp"]["email"]
+                            password_smtp = st.secrets["smtp"]["password"]
+                            msg = MIMEMultipart()
+                            msg["From"] = remitente
+                            msg["To"] = email_clean
+                            msg["Subject"] = "Recuperación de contraseña - Gestión Financiera Empresarial"
+                            cuerpo = f"Hola,\n\nHas solicitado recuperar tu contraseña en el Portal Financiero.\nTu contraseña temporal es: {temp_pass}\n\nInicia sesión con ella y recuerda cambiarla."
+                            msg.attach(MIMEText(cuerpo, "plain"))
+                            server = smtplib.SMTP("smtp.gmail.com", 587)
+                            server.starttls()
+                            server.login(remitente, password_smtp)
+                            server.sendmail(remitente, email_clean, msg.as_string())
+                            server.quit()
+                            st.success("Enviamos la contraseña temporal. Revisa tu bandeja de entrada y la carpeta de spam.")
+                        except Exception as e:
+                            st.error(f"No se pudo enviar el correo. Revisa la configuración SMTP de la aplicación. Detalle: {e}")
+                    else:
+                        st.error("No encontramos una cuenta con ese correo electrónico.")
 
     st.stop()
-
-if not validar_y_actualizar_acceso_empresa():
+if st.session_state.get("logged_in") and not validar_membresia_actual():
+    st.session_state.logged_in = False
+    st.session_state.user_data = None
+    st.session_state.pop("ingresos_df", None)
+    st.session_state.pop("gastos_df", None)
+    st.error("Tu acceso a esta empresa fue revocado o no está activo. Contacta al administrador.")
     st.stop()
 
 # --- INICIALIZAR ESTADO DE OMITIR ALERTA ---
@@ -1386,84 +1590,97 @@ if st.sidebar.button("🚪 Cerrar Sesión"):
     st.session_state.logged_in = False
     st.session_state.user_data = None
     st.session_state.omitir_alerta_presupuesto = False
-    limpiar_datos_privados_sesion()
-    st.session_state.equipo_mostrar_hasta = 100
     st.rerun()
 
 st.sidebar.markdown("---")
-empresa_email_base = get_institucion_id() or "Sin empresa vinculada"
-st.sidebar.caption(f"**Empresa:** {obtener_nombre_empresa()}\n\nCorreo base: {empresa_email_base}")
 st.sidebar.markdown("⚙️ **Presupuesto de la empresa**")
-
-config_presupuesto = cargar_presupuesto_general()
+cfg_presupuesto = cargar_configuracion_presupuesto()
 hoy = dt_module.date.today()
 try:
-    fecha_inicio_guardada = dt_module.date.fromisoformat(config_presupuesto.get("fecha_inicio", hoy.isoformat()))
-except (TypeError, ValueError):
-    fecha_inicio_guardada = hoy
-try:
-    fecha_fin_guardada = dt_module.date.fromisoformat(config_presupuesto.get("fecha_fin", (hoy + dt_module.timedelta(days=30)).isoformat()))
-except (TypeError, ValueError):
-    fecha_fin_guardada = hoy + dt_module.timedelta(days=30)
+    inicio_default = dt_module.date.fromisoformat(cfg_presupuesto["fecha_inicio_presupuesto"])
+    fin_default = dt_module.date.fromisoformat(cfg_presupuesto["fecha_fin_presupuesto"])
+except (KeyError, TypeError, ValueError):
+    inicio_default, fin_default = hoy, hoy + dt_module.timedelta(days=30)
 
 puede_configurar_presupuesto = tiene_permiso("configurar_presupuesto")
-with st.sidebar.form("form_presupuesto_general"):
+clave_tenant = hashlib.sha256((get_institucion_id() or "sin-empresa").encode("utf-8")).hexdigest()[:12]
+with st.sidebar.form("form_configuracion_presupuesto"):
     periodo_presupuesto = st.date_input(
-        "📅 Período de ejecución",
-        value=(fecha_inicio_guardada, fecha_fin_guardada),
+        "Período de ejecución",
+        value=(inicio_default, fin_default),
+        key=f"periodo_presupuesto_{clave_tenant}",
         disabled=not puede_configurar_presupuesto,
-        key=f"periodo_presupuesto_{empresa_email_base}",
     )
     presupuesto_tope = st.number_input(
-        "Límite de gastos ($)", min_value=0.0,
-        value=float(config_presupuesto.get("monto", 0.0)), step=50000.0,
+        "Límite de gastos (COP)",
+        min_value=0.0,
+        value=float(cfg_presupuesto["presupuesto_tope"]),
+        step=50000.0,
+        key=f"presupuesto_tope_{clave_tenant}",
         disabled=not puede_configurar_presupuesto,
-        key=f"monto_presupuesto_{empresa_email_base}",
     )
-    guardar_presupuesto = st.form_submit_button("Guardar presupuesto", disabled=not puede_configurar_presupuesto)
-
-if guardar_presupuesto:
-    if not isinstance(periodo_presupuesto, tuple) or len(periodo_presupuesto) != 2 or periodo_presupuesto[1] < periodo_presupuesto[0]:
-        st.sidebar.error("Selecciona un período válido.")
-    elif guardar_presupuesto_general(presupuesto_tope, periodo_presupuesto[0], periodo_presupuesto[1]):
-        registrar_auditoria("Actualizó presupuesto general", f"${presupuesto_tope:,.0f} | {periodo_presupuesto[0]} a {periodo_presupuesto[1]}")
-        st.sidebar.success("Presupuesto guardado para toda la empresa.")
-        st.rerun()
+    guardar_presupuesto_click = st.form_submit_button(
+        "Guardar presupuesto",
+        disabled=not puede_configurar_presupuesto,
+        use_container_width=True,
+    )
+if guardar_presupuesto_click:
+    if guardar_configuracion_presupuesto(presupuesto_tope, periodo_presupuesto):
+        registrar_auditoria("Actualizó presupuesto general", f"{presupuesto_tope:,.0f} COP")
+        st.sidebar.success("Presupuesto guardado para esta empresa.")
     else:
-        st.sidebar.error("No se pudo guardar el presupuesto en la nube.")
+        st.sidebar.error("No se pudo guardar el presupuesto.")
 if not puede_configurar_presupuesto:
-    st.sidebar.caption("Solo lectura según tu rango.")
+    st.sidebar.caption("Solo lectura: tu rango no permite modificarlo.")
 
-if config_presupuesto.get("configurado") and isinstance(periodo_presupuesto, tuple) and len(periodo_presupuesto) == 2:
+if isinstance(periodo_presupuesto, tuple) and len(periodo_presupuesto) == 2:
     fecha_fin = periodo_presupuesto[1]
-
-    if hoy > fecha_fin:
-        if not st.session_state.omitir_alerta_presupuesto:
-            with st.sidebar.container():
-                st.warning("⚠️ **¡Tiempo finalizado!**\n\nEl período de tu presupuesto ha terminado. Por favor, asigna uno nuevo.")
-                if st.button("Omitir por ahora"):
-                    st.session_state.omitir_alerta_presupuesto = True
-                    st.rerun()
-    else:
+    if hoy > fecha_fin and not st.session_state.omitir_alerta_presupuesto:
+        with st.sidebar.container():
+            st.warning("El período del presupuesto terminó. Actualiza las fechas cuando corresponda.")
+            if puede_configurar_presupuesto and st.button("Omitir por ahora"):
+                st.session_state.omitir_alerta_presupuesto = True
+                st.rerun()
+    elif hoy <= fecha_fin:
         st.session_state.omitir_alerta_presupuesto = False
 
 st.sidebar.markdown("---")
-opciones_menu = []
-if tiene_permiso("ver_finanzas"):
-    opciones_menu.extend([
-        "1. Inicio", "2. Registro de Ingresos", "3. Registro de Gastos",
-        "4. Balance Financiero", "5. Dashboard y Gráficos",
-        "6. Anexo de Recibos & QR", "7. Gestión de Archivos", "8. Reporte Final",
-    ])
-if tiene_permiso("ver_auditoria"):
-    opciones_menu.append("9. Auditoría del Sistema")
-if tiene_permiso("ver_finanzas"):
-    opciones_menu.append("10. Facturas (OCR) y Anomalías")
-if tiene_permiso("gestionar_equipo"):
-    opciones_menu.append("11. Gestión de Equipo")
+opciones_menu = [
+    "1. Inicio",
+    "2. Registro de Ingresos",
+    "3. Registro de Gastos",
+    "4. Balance Financiero",
+    "5. Dashboard y Gráficos",
+    "6. Anexo de Recibos & QR",
+    "7. Gestión de Archivos",
+    "8. Reporte Final",
+    "9. Auditoría del Sistema",
+    "10. Facturas (OCR) y Anomalías",
+]
+opciones_menu.append("11. Gestión de Equipo")
+permisos_menu = {
+    "1. Inicio": None,
+    "2. Registro de Ingresos": "ver_finanzas",
+    "3. Registro de Gastos": "ver_finanzas",
+    "4. Balance Financiero": "ver_finanzas",
+    "5. Dashboard y Gráficos": "ver_finanzas",
+    "6. Anexo de Recibos & QR": "generar_recibos",
+    "7. Gestión de Archivos": "gestionar_archivos",
+    "8. Reporte Final": "ver_finanzas",
+    "9. Auditoría del Sistema": "ver_auditoria",
+    "10. Facturas (OCR) y Anomalías": ("subir_comprobantes", "aprobar_pendientes"),
+    "11. Gestión de Equipo": "gestionar_equipo",
+}
+opciones_menu = [
+    opcion for opcion in opciones_menu
+    if permisos_menu.get(opcion) is None
+    or (any(tiene_permiso(p) for p in permisos_menu[opcion])
+        if isinstance(permisos_menu[opcion], tuple)
+        else tiene_permiso(permisos_menu[opcion]))
+]
 if not opciones_menu:
-    opciones_menu.append("Acceso restringido")
-menu = st.sidebar.selectbox("Sección", opciones_menu)
+    opciones_menu = ["1. Inicio"]
+menu = st.sidebar.selectbox("📌 Selecciona una sección:", opciones_menu)
 # --- APARTADO DE IA EN EL BORDE ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("🤖 **Asistente IA del Borde**")
@@ -1508,14 +1725,14 @@ if st.session_state.ia_abierta:
 
 # --- RUTAS DE LAS PÁGINAS ---
 if menu == "1. Inicio":
-    st.markdown('<p class="main-header">Portal de Control Financiero</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">🏛️ Proyecto de Control y Gestión Financiera</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Plataforma centralizada para la administración y supervisión de recursos</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     col1, col2 = st.columns([2, 1])
     with col1:
         st.markdown("### 🎯 Objetivo del Sistema")
-        st.write("Control transparente de ingresos y gastos, revisión de comprobantes, auditoría y seguimiento del presupuesto compartido por tu empresa.")
+        st.write("Control transparente y automatizado de ingresos, gastos, presupuestos, documentos y aprobaciones, con datos separados por empresa.")
     with col2:
         st.success("✅ **Estado del Sistema:** Operativo y Guardado en Nube.")
 
@@ -1523,154 +1740,188 @@ if menu == "1. Inicio":
     st.markdown("### 👥 Equipo")
     equipo_actual = obtener_lista_responsables()
     equipo_data = [{"N.°": i + 1, "Nombre": nombre} for i, nombre in enumerate(equipo_actual)]
-    mostrar_tabla_adaptativa(pd.DataFrame(equipo_data), hide_index=True)
-    if len(equipo_actual) >= 100:
-        st.caption("Se muestra una vista resumida del equipo. La gestión completa está disponible en la sección de integrantes.")
+    st.dataframe(pd.DataFrame(equipo_data), use_container_width=True, hide_index=True)
     if tiene_permiso("gestionar_equipo"):
         st.caption("Gestiona rangos e invita nuevas personas desde '11. Gestión de Equipo' en el menú lateral.")
 
 elif menu == "2. Registro de Ingresos":
-    st.markdown('<p class="main-header">Registro de Ingresos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">📈 Registro de Ingresos</p>', unsafe_allow_html=True)
     st.markdown("---")
 
-    if tiene_permiso("registrar"):
-        with st.expander("➕ Agregar Nuevo Ingreso", expanded=True):
-            with st.form(f"form_nuevo_ingreso_{get_institucion_id()}"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    f_ing = st.date_input("Fecha", value=dt_module.date.today())
-                    con_ing = st.text_input("Concepto")
-                with c2:
-                    resp_ing = st.text_input("Responsable", value=obtener_nombre_usuario_actual())
-                    val_ing = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
-                obs_ing = st.text_area("Observaciones (Opcional)")
+    with st.expander("➕ Agregar Nuevo Ingreso", expanded=True):
+        with st.form("form_nuevo_ingreso"):
+            c1, c2 = st.columns(2)
+            with c1:
+                f_ing = st.date_input("Fecha", value=dt_module.date.today())
+                con_ing = st.text_input("Concepto")
+            with c2:
+                resp_ing = st.selectbox("Responsable", obtener_lista_responsables())
+                val_ing = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
+            obs_ing = st.text_area("Observaciones (Opcional)")
 
-                if st.form_submit_button("Guardar Ingreso"):
-                    if con_ing.strip() == "" or val_ing <= 0:
-                        st.error("Ingresa un concepto y un valor mayor que cero.")
-                    else:
-                        reg_id = generar_id_registro("ING")
-                        nuevo_reg = {
-                            "ID": reg_id, "Fecha": f_ing.strftime("%Y-%m-%d"),
-                            "Concepto": con_ing.strip(), "Valor": float(val_ing),
-                            "Responsable": resp_ing, "Observaciones": obs_ing,
-                        }
-                        if guardar_registro_nube('ingresos', nuevo_reg):
-                            registrar_auditoria("Registró Ingreso", f"{con_ing} - ${val_ing:,.0f} (Responsable: {resp_ing})")
-                            cargar_datos_nube()
-                            st.success("Ingreso guardado en la nube de la empresa.")
+            if st.form_submit_button("Guardar Ingreso", disabled=not tiene_permiso("registrar")):
+                if not tiene_permiso("registrar"):
+                    st.error("Tu rango no permite registrar ingresos.")
+                elif con_ing.strip() == "":
+                    st.error("El concepto no puede estar vacío.")
+                else:
+                    nuevo_reg = {
+                        "ID": generar_id("ING"),
+                        "Fecha": f_ing.strftime("%Y-%m-%d"),
+                        "Concepto": con_ing.strip(),
+                        "Valor": float(val_ing),
+                        "Responsable": resp_ing,
+                        "Observaciones": obs_ing,
+                    }
+                    if tiene_permiso("aprobar_pendientes"):
+                        if guardar_registro_nube("ingresos", nuevo_reg):
+                            st.session_state.ingresos_df = pd.concat(
+                                [st.session_state.ingresos_df, pd.DataFrame([nuevo_reg])],
+                                ignore_index=True,
+                            )
+                            registrar_auditoria("Registró Ingreso", f"{con_ing} - {val_ing:,.0f} COP")
+                            st.success("Ingreso registrado.")
                             st.rerun()
                         else:
-                            st.error("No se pudo guardar el ingreso en la nube. No se modificó el balance.")
-    else:
-        st.info("Tu rango tiene acceso de consulta. Para registrar ingresos, solicita el permiso al propietario.")
+                            st.error("No se pudo guardar el ingreso en la nube.")
+                    else:
+                        pendiente_id = guardar_pendiente_movimiento(
+                            "Ingreso", nuevo_reg,
+                            ["Registro manual enviado a revisión por el rango del usuario."],
+                            origen="Registro manual",
+                        )
+                        if pendiente_id:
+                            registrar_auditoria("Envió Ingreso a revisión", f"{con_ing} - {val_ing:,.0f} COP")
+                            st.success("Ingreso enviado a revisión; se contará en el presupuesto al ser aprobado.")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo crear el ingreso pendiente.")
 
-    df_ingresos = st.session_state.ingresos_df
-    df_ingresos_periodo = filtrar_movimientos_periodo(df_ingresos, periodo_presupuesto)
-    df_gastos_periodo = filtrar_movimientos_periodo(st.session_state.gastos_df, periodo_presupuesto)
-    tot_ing_actual = pd.to_numeric(df_ingresos_periodo.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
-    tot_gas_actual = pd.to_numeric(df_gastos_periodo.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+    # Solo las transacciones aprobadas participan en esta comparación.
+    tot_ing_actual = pd.to_numeric(
+        st.session_state.ingresos_df.get("Valor", pd.Series(dtype=float)), errors="coerce"
+    ).fillna(0).sum()
+    tot_gas_actual = pd.to_numeric(
+        st.session_state.gastos_df.get("Valor", pd.Series(dtype=float)), errors="coerce"
+    ).fillna(0).sum()
     relacion = calcular_relacion_presupuesto(tot_ing_actual, tot_gas_actual, presupuesto_tope)
-
-    st.markdown("### 📊 Ingresos relacionados con el presupuesto")
-    m1, m2, m3 = st.columns(3)
-    m1.metric("Ingresos del período", f"${tot_ing_actual:,.0f} COP")
-    m2.metric("Límite de gastos", f"${presupuesto_tope:,.0f} COP")
-    m3.metric("Saldo neto", f"${relacion['saldo']:,.0f} COP")
-    if isinstance(periodo_presupuesto, tuple) and len(periodo_presupuesto) == 2:
-        st.caption(f"Indicadores del período: {periodo_presupuesto[0]} a {periodo_presupuesto[1]}. La tabla conserva el historial completo.")
+    st.markdown("### Relación de ingresos y gastos con el presupuesto")
     if relacion["nivel"] == "critico":
         st.error(relacion["mensaje"])
     elif relacion["nivel"] == "alerta":
         st.warning(relacion["mensaje"])
     elif relacion["nivel"] == "ok":
-        st.success(relacion["mensaje"])
-    else:
         st.info(relacion["mensaje"])
-    if presupuesto_tope > 0:
-        st.progress(min(max(relacion["porcentaje_ingresos"] / 100, 0.0), 1.0), text=f"Ingresos equivalentes al {relacion['porcentaje_ingresos']:.0f}% del presupuesto")
+    else:
+        st.caption(relacion["mensaje"])
+    col_ing_rel, col_gas_rel, col_cobertura_rel = st.columns(3)
+    col_ing_rel.metric("Ingresos aprobados", f"{tot_ing_actual:,.0f} COP")
+    col_gas_rel.metric("Gastos aprobados", f"{tot_gas_actual:,.0f} COP")
+    col_cobertura_rel.metric("Cobertura del presupuesto", f"{relacion.get('porcentaje_cubierto', 0):.0f}%")
 
-    if not df_ingresos.empty:
-        mostrar_tabla_adaptativa(df_ingresos.drop(columns=['ID'], errors='ignore'), hide_index=True)
+    if not st.session_state.ingresos_df.empty:
+        st.dataframe(st.session_state.ingresos_df.drop(columns=['ID']), use_container_width=True)
+        st.metric("💵 TOTAL INGRESOS", f"${st.session_state.ingresos_df['Valor'].astype(float).sum():,.0f} COP")
+
         if tiene_permiso("eliminar_registros"):
-            st.markdown("### 🗑️ Eliminar Ingreso")
-            opciones = [f"{row['Concepto']} - ${row['Valor']:,.0f} ({row['ID']})" for _, row in df_ingresos.iterrows()]
-            seleccion = st.selectbox("Selecciona para eliminar:", opciones, key=f"seleccion_eliminar_ingreso_{get_institucion_id()}")
-            if st.button("❌ Eliminar Ingreso", key=f"boton_eliminar_ingreso_{get_institucion_id()}"):
+            st.markdown("### Eliminar ingreso")
+            opciones = [f"{row['Concepto']} - {chr(36)}{row['Valor']:,.0f}" for _, row in st.session_state.ingresos_df.iterrows()]
+            seleccion = st.selectbox("Selecciona para eliminar:", opciones, key="sel_ingreso_eliminar")
+            if st.button("Eliminar ingreso", key="btn_eliminar_ingreso"):
                 idx = opciones.index(seleccion)
-                fila = df_ingresos.iloc[idx]
-                if eliminar_registro_nube('ingresos', fila['ID']):
-                    registrar_auditoria("Eliminó Ingreso", f"{fila['Concepto']} - ${float(fila['Valor']):,.0f}")
-                    cargar_datos_nube()
+                fila = st.session_state.ingresos_df.iloc[idx]
+                if eliminar_registro_nube("ingresos", fila["ID"]):
+                    registrar_auditoria("Eliminó Ingreso", f"{fila['Concepto']} - {float(fila['Valor']):,.0f} COP")
+                    st.session_state.ingresos_df = st.session_state.ingresos_df.drop(idx).reset_index(drop=True)
                     st.success("Ingreso eliminado.")
                     st.rerun()
                 else:
-                    st.error("No se pudo eliminar el ingreso de la nube.")
-
+                    st.error("No se pudo eliminar el ingreso.")
+        else:
+            st.caption("Tu rango no permite eliminar ingresos.")
+    
 elif menu == "3. Registro de Gastos":
-    st.markdown('<p class="main-header">Registro de Gastos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">📉 Registro de Gastos</p>', unsafe_allow_html=True)
     st.markdown("---")
 
-    gastos_del_periodo = filtrar_movimientos_periodo(st.session_state.gastos_df, periodo_presupuesto)
-    current_total_gastos = pd.to_numeric(gastos_del_periodo.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+    current_total_gastos = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
     if presupuesto_tope > 0 and current_total_gastos > presupuesto_tope:
-        st.error(f"🚨 Los gastos del período superan el límite en ${current_total_gastos - presupuesto_tope:,.0f} COP.")
+        st.error(f"🚨 ¡ATENCIÓN! Has superado el límite de ${presupuesto_tope:,.0f} COP.")
     elif presupuesto_tope > 0:
-        st.info(f"ℹ️ Disponible en el período: ${(presupuesto_tope - current_total_gastos):,.0f} COP.")
+        st.info(f"ℹ️ Disponible: ${(presupuesto_tope - current_total_gastos):,.0f} COP.")
 
-    if tiene_permiso("registrar"):
-        with st.expander("➕ Agregar Nuevo Gasto", expanded=True):
-            with st.form(f"form_nuevo_gasto_{get_institucion_id()}"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    f_gas = st.date_input("Fecha Gasto", value=dt_module.date.today())
-                    con_gas = st.text_input("Concepto")
-                    cat_gas = st.selectbox("Categoría", CATEGORIAS_GASTO)
-                with c2:
-                    val_gas = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
-                    resp_gas = st.text_input("Responsable", value=obtener_nombre_usuario_actual())
+    with st.expander("➕ Agregar Nuevo Gasto", expanded=True):
+        with st.form("form_nuevo_gasto"):
+            c1, c2 = st.columns(2)
+            with c1:
+                f_gas = st.date_input("Fecha Gasto", value=dt_module.date.today())
+                con_gas = st.text_input("Concepto")
+                cat_gas = st.selectbox("Categoría", CATEGORIAS_GASTO)
+            with c2:
+                val_gas = st.number_input("Valor ($)", min_value=0.0, step=1000.0, format="%.2f")
+                resp_gas = st.selectbox("Responsable", obtener_lista_responsables())
 
-                if st.form_submit_button("Guardar Gasto"):
-                    if con_gas.strip() == "" or val_gas <= 0:
-                        st.error("Ingresa un concepto y un valor mayor que cero.")
-                    else:
-                        reg_id = generar_id_registro("GAS")
-                        nuevo_reg = {
-                            "ID": reg_id, "Fecha": f_gas.strftime("%Y-%m-%d"),
-                            "Concepto": con_gas.strip(), "Categoría": cat_gas,
-                            "Valor": float(val_gas), "Responsable": resp_gas,
-                        }
-                        if guardar_registro_nube('gastos', nuevo_reg):
-                            registrar_auditoria("Registró Gasto", f"{con_gas} - ${val_gas:,.0f} (Categoría: {cat_gas}, Responsable: {resp_gas})")
-                            cargar_datos_nube()
-                            st.success("Gasto guardado en la nube de la empresa.")
+            if st.form_submit_button("Guardar Gasto", disabled=not tiene_permiso("registrar")):
+                if not tiene_permiso("registrar"):
+                    st.error("Tu rango no permite registrar gastos.")
+                elif con_gas.strip() == "":
+                    st.error("El concepto no puede estar vacío.")
+                else:
+                    nuevo_reg = {
+                        "ID": generar_id("GAS"),
+                        "Fecha": f_gas.strftime("%Y-%m-%d"),
+                        "Concepto": con_gas.strip(),
+                        "Categoría": cat_gas,
+                        "Valor": float(val_gas),
+                        "Responsable": resp_gas,
+                    }
+                    if tiene_permiso("aprobar_pendientes"):
+                        if guardar_registro_nube("gastos", nuevo_reg):
+                            st.session_state.gastos_df = pd.concat(
+                                [st.session_state.gastos_df, pd.DataFrame([nuevo_reg])],
+                                ignore_index=True,
+                            )
+                            registrar_auditoria("Registró Gasto", f"{con_gas} - {val_gas:,.0f} COP")
+                            st.success("Gasto registrado.")
                             st.rerun()
                         else:
-                            st.error("No se pudo guardar el gasto en la nube. No se modificó el balance.")
-    else:
-        st.info("Tu rango tiene acceso de consulta. Para registrar gastos, solicita el permiso al propietario.")
-
+                            st.error("No se pudo guardar el gasto en la nube.")
+                    else:
+                        pendiente_id = guardar_pendiente_movimiento(
+                            "Gasto", nuevo_reg,
+                            ["Registro manual enviado a revisión por el rango del usuario."],
+                            origen="Registro manual",
+                        )
+                        if pendiente_id:
+                            registrar_auditoria("Envió Gasto a revisión", f"{con_gas} - {val_gas:,.0f} COP")
+                            st.success("Gasto enviado a revisión; aún no afecta el presupuesto.")
+                            st.rerun()
+                        else:
+                            st.error("No se pudo crear el gasto pendiente.")
+    
     if not st.session_state.gastos_df.empty:
-        mostrar_tabla_adaptativa(st.session_state.gastos_df.drop(columns=['ID'], errors='ignore'), hide_index=True)
+        st.dataframe(st.session_state.gastos_df.drop(columns=['ID']), use_container_width=True)
         st.metric("💸 TOTAL GASTOS", f"${current_total_gastos:,.0f} COP")
 
         if tiene_permiso("eliminar_registros"):
-            st.markdown("### 🗑️ Eliminar Gasto")
-            opciones = [f"{row['Concepto']} - ${row['Valor']:,.0f} ({row['ID']})" for _, row in st.session_state.gastos_df.iterrows()]
-            seleccion = st.selectbox("Selecciona para eliminar:", opciones, key=f"seleccion_eliminar_gasto_{get_institucion_id()}")
-
-            if st.button("❌ Eliminar Gasto", key=f"boton_eliminar_gasto_{get_institucion_id()}"):
+            st.markdown("### Eliminar gasto")
+            opciones = [f"{row['Concepto']} - {chr(36)}{row['Valor']:,.0f}" for _, row in st.session_state.gastos_df.iterrows()]
+            seleccion = st.selectbox("Selecciona para eliminar:", opciones, key="sel_gasto_eliminar")
+            if st.button("Eliminar gasto", key="btn_eliminar_gasto"):
                 idx = opciones.index(seleccion)
                 fila = st.session_state.gastos_df.iloc[idx]
-                if eliminar_registro_nube('gastos', fila['ID']):
-                    registrar_auditoria("Eliminó Gasto", f"{fila['Concepto']} - ${float(fila['Valor']):,.0f}")
-                    cargar_datos_nube()
+                if eliminar_registro_nube("gastos", fila["ID"]):
+                    registrar_auditoria("Eliminó Gasto", f"{fila['Concepto']} - {float(fila['Valor']):,.0f} COP")
+                    st.session_state.gastos_df = st.session_state.gastos_df.drop(idx).reset_index(drop=True)
                     st.success("Gasto eliminado.")
                     st.rerun()
                 else:
-                    st.error("No se pudo eliminar el gasto de la nube.")
+                    st.error("No se pudo eliminar el gasto.")
+        else:
+            st.caption("Tu rango no permite eliminar gastos.")
+    
 elif menu == "4. Balance Financiero":
-    st.markdown('<p class="main-header">Balance Financiero General</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">⚖️ Balance Financiero General</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
@@ -1683,7 +1934,7 @@ elif menu == "4. Balance Financiero":
     c3.metric("💰 Saldo Neto", f"${saldo:,.0f} COP", delta=f"${saldo:,.0f} COP")
 
 elif menu == "5. Dashboard y Gráficos":
-    st.markdown('<p class="main-header">Tablero Ejecutivo</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">📊 Dashboard Interactivo</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     tot_ing = pd.to_numeric(st.session_state.ingresos_df["Valor"], errors='coerce').sum() if not st.session_state.ingresos_df.empty else 0.0
@@ -1693,7 +1944,7 @@ elif menu == "5. Dashboard y Gráficos":
     with col1:
         st.markdown("#### Ingresos vs Gastos")
         df_comp = pd.DataFrame({"Tipo": ["Ingresos", "Gastos"], "Monto": [tot_ing, tot_gas]})
-        fig_bar = aplicar_tema_grafico(px.bar(df_comp, x="Tipo", y="Monto", color="Tipo", text_auto=True, color_discrete_sequence=["#10B981", "#EF4444"]))
+        fig_bar = px.bar(df_comp, x="Tipo", y="Monto", color="Tipo", text_auto=True, color_discrete_sequence=["#10B981", "#EF4444"])
         st.plotly_chart(fig_bar, use_container_width=True)
 
     with col2:
@@ -1702,7 +1953,7 @@ elif menu == "5. Dashboard y Gráficos":
             df_gastos_temp = st.session_state.gastos_df.copy()
             df_gastos_temp["Valor"] = pd.to_numeric(df_gastos_temp["Valor"], errors='coerce').fillna(0)
             df_cat = df_gastos_temp.groupby("Categoría")["Valor"].sum().reset_index()
-            fig_pie = aplicar_tema_grafico(px.pie(df_cat, names="Categoría", values="Valor", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3))
+            fig_pie = px.pie(df_cat, names="Categoría", values="Valor", hole=0.4, color_discrete_sequence=px.colors.qualitative.Set3)
             st.plotly_chart(fig_pie, use_container_width=True)
         else:
             st.info("No hay gastos registrados aún.")
@@ -1727,7 +1978,7 @@ elif menu == "5. Dashboard y Gráficos":
         df_timeline = df_timeline.dropna(subset=["Fecha"]).sort_values("Fecha")
 
         if not df_timeline.empty:
-            fig_line = aplicar_tema_grafico(px.line(df_timeline, x="Fecha", y="Valor", color="Tipo", markers=True, color_discrete_map={"Ingreso": "#10B981", "Gasto": "#EF4444"}))
+            fig_line = px.line(df_timeline, x="Fecha", y="Valor", color="Tipo", markers=True, color_discrete_map={"Ingreso": "#10B981", "Gasto": "#EF4444"})
             st.plotly_chart(fig_line, use_container_width=True)
         else:
             st.info("Las fechas registradas no tienen un formato válido para la línea de tiempo.")
@@ -1740,7 +1991,7 @@ elif menu == "5. Dashboard y Gráficos":
     # Si tu versión es anterior, el gráfico se ve igual pero el clic no filtra la tabla.
     # =====================================================================================
     st.markdown("---")
-    st.markdown('<p class="main-header" style="font-size:1.6rem;">Desviaciones Presupuestarias</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header" style="font-size:1.6rem;">🎯 Tablero Ejecutivo — Desviaciones Presupuestarias</p>', unsafe_allow_html=True)
 
     with st.expander("⚙️ Configurar presupuesto asignado por categoría"):
         presupuestos_actuales = cargar_presupuestos_categoria()
@@ -1755,15 +2006,13 @@ elif menu == "5. Dashboard y Gráficos":
                 with col:
                     nuevos_presupuestos[categoria] = st.number_input(
                         categoria, min_value=0.0, value=presupuestos_actuales.get(categoria, 0.0),
-                        step=50000.0, key=f"presupuesto_{get_institucion_id()}_{categoria}"
+                        step=50000.0, key=f"presupuesto_{categoria}"
                     )
             if st.button("💾 Guardar presupuestos por categoría"):
-                if guardar_presupuestos_categoria(nuevos_presupuestos):
-                    registrar_auditoria("Actualizó presupuestos por categoría", str(nuevos_presupuestos))
-                    st.success("Presupuestos actualizados.")
-                    st.rerun()
-                else:
-                    st.error("No se pudieron guardar los presupuestos.")
+                guardar_presupuestos_categoria(nuevos_presupuestos)
+                registrar_auditoria("Actualizó presupuestos por categoría", str(nuevos_presupuestos))
+                st.success("Presupuestos actualizados.")
+                st.rerun()
 
     presupuestos_categoria = cargar_presupuestos_categoria()
 
@@ -1772,12 +2021,12 @@ elif menu == "5. Dashboard y Gráficos":
         df_gastos_cat["Valor"] = pd.to_numeric(df_gastos_cat["Valor"], errors='coerce').fillna(0)
         df_desviacion = calcular_tabla_desviaciones(st.session_state.gastos_df, presupuestos_categoria)
 
-        fig_desviacion = aplicar_tema_grafico(px.bar(
+        fig_desviacion = px.bar(
             df_desviacion, x="Categoría", y=["Gasto Real", "Presupuesto Asignado"],
             barmode="group", text_auto=True,
             color_discrete_map={"Gasto Real": "#EF4444", "Presupuesto Asignado": "#94A3B8"},
             title="Gasto real vs. presupuesto asignado por categoría — haz clic en una barra para ver el detalle"
-        ))
+        )
 
         try:
             evento = st.plotly_chart(
@@ -1794,68 +2043,96 @@ elif menu == "5. Dashboard y Gráficos":
             categoria_seleccionada = None
             st.caption("ℹ️ Actualiza Streamlit a la versión 1.35 o superior para habilitar el drill-down por clic.")
 
-        mostrar_tabla_adaptativa(df_desviacion, hide_index=True, columna_alerta="Desviación")
+        st.dataframe(
+            df_desviacion.style.apply(
+                lambda fila: ['background-color: #FEE2E2' if fila["Desviación"] > 0 else '' for _ in fila], axis=1
+            ),
+            use_container_width=True, hide_index=True
+        )
 
         if categoria_seleccionada:
             st.markdown(f"#### 🔍 Detalle de transacciones — {categoria_seleccionada}")
             detalle_cat = df_gastos_cat[df_gastos_cat["Categoría"] == categoria_seleccionada].drop(columns=['ID'], errors='ignore')
             if not detalle_cat.empty:
-                mostrar_tabla_adaptativa(detalle_cat, hide_index=True)
+                st.dataframe(detalle_cat, use_container_width=True, hide_index=True)
             else:
                 st.info("No hay transacciones registradas en esta categoría todavía.")
     else:
         st.info("Registra gastos para ver el tablero de desviaciones presupuestarias.")
 
 elif menu == "6. Anexo de Recibos & QR":
-    st.markdown('<p class="main-header">Generador de Comprobantes</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">Comprobante financiero y descarga QR</p>', unsafe_allow_html=True)
     st.markdown("---")
-    st.info("💡 Haz clic para generar el comprobante oficial decorado con los datos financieros actuales y su código QR.")
+    st.info("El QR abre la descarga PNG del comprobante. El enlace usa un token revocable de Firebase Storage.")
+    if st.button("Generar y guardar comprobante PNG", disabled=not tiene_permiso("generar_recibos")):
+        try:
+            if not bucket:
+                raise RuntimeError("Firebase Storage no está configurado.")
+            tot_ing = pd.to_numeric(st.session_state.ingresos_df.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+            tot_gas = pd.to_numeric(st.session_state.gastos_df.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum()
+            saldo = tot_ing - tot_gas
+            rec_id = generar_id("GEN")
+            fecha_actual = dt_module.date.today().isoformat()
+            empresa_doc = db.collection("usuarios").document(get_institucion_id()).get().to_dict() or {}
+            nombre_empresa = empresa_doc.get("institucion") or empresa_doc.get("nombre_empresa") or "Empresa"
+            prefijo = prefijo_storage_empresa()
+            if not prefijo:
+                raise RuntimeError("No se pudo identificar la nube de la empresa.")
+            ruta_storage = f"{prefijo}/recibos/{rec_id}.png"
+            token_descarga = uuid.uuid4().hex
+            blob_recibo = bucket.blob(ruta_storage)
+            blob_recibo.metadata = {"firebaseStorageDownloadTokens": token_descarga}
+            blob_recibo.content_type = "image/png"
+            blob_recibo.content_disposition = f'attachment; filename="{rec_id}.png"'
+            url_descarga = (
+                "https://firebasestorage.googleapis.com/v0/b/"
+                + quote(bucket.name, safe="")
+                + "/o/" + quote(ruta_storage, safe="")
+                + "?alt=media&token=" + token_descarga
+            )
+            qr = qrcode.QRCode(box_size=8, border=3, error_correction=qrcode.constants.ERROR_CORRECT_M)
+            qr.add_data(url_descarga)
+            qr.make(fit=True)
+            qr_img_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+            buffer_recibo = generar_imagen_recibo(
+                rec_id, fecha_actual, tot_ing, tot_gas, saldo, qr_img_pil, nombre_empresa
+            )
+            bytes_recibo = buffer_recibo.getvalue()
+            blob_recibo.upload_from_string(bytes_recibo, content_type="image/png")
+            st.session_state.rec_img_bytes = bytes_recibo
+            st.session_state.rec_img_nombre = f"{rec_id}.png"
+            registrar_auditoria("Generó comprobante descargable", rec_id)
+            st.success("Comprobante guardado. Al escanear el QR se descarga el PNG.")
+        except Exception as e:
+            st.error(f"No se pudo guardar el comprobante con QR: {e}")
 
-    if st.button("🚀 Generar Comprobante Oficial"):
-        tot_ing = st.session_state.ingresos_df["Valor"].astype(float).sum() if not st.session_state.ingresos_df.empty else 0.0
-        tot_gas = st.session_state.gastos_df["Valor"].astype(float).sum() if not st.session_state.gastos_df.empty else 0.0
-        saldo = tot_ing - tot_gas
-        rec_id = generar_id_registro("GEN")
-        nombre_empresa_recibo = obtener_nombre_empresa()
-        texto_recibo = f"COMPROBANTE {rec_id}\nEmpresa: {nombre_empresa_recibo}\nIngresos: ${tot_ing:,.0f}\nGastos: ${tot_gas:,.0f}\nSaldo: ${saldo:,.0f}"
-        qr = qrcode.QRCode(box_size=10, border=2)
-        qr.add_data(texto_recibo)
-        qr.make(fit=True)
-        qr_img_pil = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-
-        rec_id = f"GEN-{dt_module.datetime.now().strftime('%Y%m%d%H%M')}"
-        fecha_actual = dt_module.datetime.now().strftime("%Y-%m-%d")
-        buffer_recibo = generar_imagen_recibo(rec_id, fecha_actual, tot_ing, tot_gas, saldo, qr_img_pil, nombre_empresa_recibo)
-        st.session_state.rec_img_bytes = buffer_recibo.getvalue()
-        st.success("✅ ¡Comprobante generado exitosamente!")
-
-    if 'rec_img_bytes' in st.session_state:
+    if "rec_img_bytes" in st.session_state:
         st.image(st.session_state.rec_img_bytes, width=450)
         st.download_button(
-            "📥 Descargar Comprobante PNG",
+            "Descargar comprobante PNG",
             data=st.session_state.rec_img_bytes,
-            file_name="Comprobante_Financiero.png",
-            mime="image/png"
+            file_name=st.session_state.get("rec_img_nombre", "Comprobante_Financiero.png"),
+            mime="image/png",
         )
 
 elif menu == "7. Gestión de Archivos":
-    st.markdown('<p class="main-header">Repositorio de Documentos</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">📁 Repositorio de Documentos</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Registra, administra y visualiza los comprobantes del proyecto.</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     import base64
 
-    with st.form(f"form_subir_archivo_{get_institucion_id()}"):
-        archivo_subido = st.file_uploader("Sube tu archivo (PDF, PNG, JPG)", type=["png", "jpg", "jpeg", "pdf"], disabled=not tiene_permiso("gestionar_archivos"), key=f"repositorio_upload_{get_institucion_id()}")
-        descripcion_archivo = st.text_input("Descripción o Nota del Documento", disabled=not tiene_permiso("gestionar_archivos"))
-        submit_archivo = st.form_submit_button("💾 Guardar y Registrar Archivo", disabled=not tiene_permiso("gestionar_archivos"))
+    with st.form("form_subir_archivo"):
+        archivo_subido = st.file_uploader("Sube tu archivo (PDF, PNG, JPG)", type=["png", "jpg", "jpeg", "pdf"])
+        descripcion_archivo = st.text_input("Descripción o Nota del Documento")
+        submit_archivo = st.form_submit_button("💾 Guardar y Registrar Archivo")
 
-        if submit_archivo and db and tiene_permiso("gestionar_archivos"):
+        if submit_archivo and db:
             if archivo_subido is not None:
                 bytes_archivo = archivo_subido.getvalue()
                 base64_archivo = base64.b64encode(bytes_archivo).decode('utf-8')
 
-                nombre_id = generar_id_registro("ARCH")
+                nombre_id = generar_id("ARCH")
                 institucion_id = get_institucion_id()
                 doc_data = {
                     "ID": nombre_id,
@@ -1872,9 +2149,6 @@ elif menu == "7. Gestión de Archivos":
                 st.rerun()
             else:
                 st.error("⚠️ Por favor selecciona un archivo antes de guardar.")
-
-    if not tiene_permiso("gestionar_archivos"):
-        st.caption("Tu rango puede consultar el repositorio, pero no guardar o eliminar archivos.")
 
     st.markdown("### 📋 Archivos Registrados con Vista Previa")
     if db:
@@ -1905,20 +2179,19 @@ elif menu == "7. Gestión de Archivos":
                                 key=f"dl_{row['ID']}"
                             )
 
-                if tiene_permiso("gestionar_archivos"):
-                    st.markdown("---")
-                    st.markdown("### 🗑️ Eliminar Registro de Archivo")
-                    opciones_arch = [f"{row['nombre']} ({row['fecha']})" for row in archivos_lista]
-                    sel_arch = st.selectbox("Selecciona archivo a eliminar:", opciones_arch, key=f"seleccion_eliminar_archivo_{get_institucion_id()}")
+                st.markdown("---")
+                st.markdown("### 🗑️ Eliminar Registro de Archivo")
+                opciones_arch = [f"{row['nombre']} ({row['fecha']})" for row in archivos_lista]
+                sel_arch = st.selectbox("Selecciona archivo a eliminar:", opciones_arch)
 
-                    if st.button("❌ Eliminar Registro", key=f"boton_eliminar_archivo_{get_institucion_id()}"):
-                        idx = opciones_arch.index(sel_arch)
-                        archivo_a_eliminar = archivos_lista[idx]
-                        doc_id_eliminar = archivo_a_eliminar['ID']
-                        db.collection("usuarios").document(institucion_id).collection("archivos").document(doc_id_eliminar).delete()
-                        registrar_auditoria("Eliminó Archivo", archivo_a_eliminar['nombre'])
-                        st.success("Registro eliminado correctamente.")
-                        st.rerun()
+                if st.button("❌ Eliminar Registro"):
+                    idx = opciones_arch.index(sel_arch)
+                    archivo_a_eliminar = archivos_lista[idx]
+                    doc_id_eliminar = archivo_a_eliminar['ID']
+                    db.collection("usuarios").document(institucion_id).collection("archivos").document(doc_id_eliminar).delete()
+                    registrar_auditoria("Eliminó Archivo", archivo_a_eliminar['nombre'])
+                    st.success("Registro eliminado correctamente.")
+                    st.rerun()
             else:
                 st.info("Aún no hay archivos registrados en el sistema.")
         except Exception as e:
@@ -1926,7 +2199,7 @@ elif menu == "7. Gestión de Archivos":
     else:
         st.warning("Conecta Firebase para ver la lista de archivos.")
 elif menu == "8. Reporte Final":
-    st.markdown('<p class="main-header">Reporte Financiero</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">📑 Reporte Financiero Profesional</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Genera y descarga un libro de Excel con diseño institucional avanzado.</p>', unsafe_allow_html=True)
     st.markdown("---")
 
@@ -1953,7 +2226,7 @@ elif menu == "8. Reporte Final":
 
         zebra_fill = PatternFill(start_color="F8FAFC", end_color="F8FAFC", fill_type="solid")
 
-        nombre_usuario = obtener_nombre_empresa()
+        nombre_usuario = st.session_state.user_data.get('institucion', 'Institución Financiera')
 
         def estilizar_hoja(ws, titulo_base, df):
             titulo_completo = f"{nombre_usuario.upper()} - {titulo_base}"
@@ -2003,8 +2276,8 @@ elif menu == "8. Reporte Final":
                         max_len = max(max_len, len(str(cell.value)))
                 ws.column_dimensions[col_letter].width = max(max_len + 5, 15)
 
-        df_ing = st.session_state.ingresos_df.drop(columns=["Ruta_Archivo"], errors="ignore")
-        df_gas = st.session_state.gastos_df.drop(columns=["Ruta_Archivo"], errors="ignore")
+        df_ing = st.session_state.ingresos_df
+        df_gas = st.session_state.gastos_df
 
         total_ingresos = float(df_ing['Valor'].sum()) if not df_ing.empty and 'Valor' in df_ing.columns else 0.0
         total_gastos = float(df_gas['Valor'].sum()) if not df_gas.empty and 'Valor' in df_gas.columns else 0.0
@@ -2052,25 +2325,24 @@ elif menu == "8. Reporte Final":
         grafico_desv.width, grafico_desv.height = 18, 10
         ws_desv.add_chart(grafico_desv, f"A{fila_fin + 3}")
 
-        excel_buffer = BytesIO()
-        wb.save(excel_buffer)
-        st.session_state.excel_reporte_bytes = excel_buffer.getvalue()
+        wb.save(EXCEL_FILE)
         st.success("✅ ¡Reporte Excel generado con éxito usando el nombre de tu cuenta!")
 
-    if "excel_reporte_bytes" in st.session_state:
-        st.download_button(
-            "Descargar archivo Excel",
-            data=st.session_state.excel_reporte_bytes,
-            file_name="Reporte_Financiero.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+    if os.path.exists(EXCEL_FILE):
+        with open(EXCEL_FILE, "rb") as f:
+            st.download_button(
+                "📥 Descargar Archivo Excel Profesional",
+                data=f,
+                file_name="Reporte_Financiero.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
     st.markdown("---")
     st.markdown("### 📄 Reporte PDF Corporativo")
     st.caption("Documento formal con la identidad visual del proyecto — no incluye firma digital ni certificación legal.")
 
     if st.button("📄 Generar Reporte PDF Corporativo"):
-        nombre_institucion_pdf = obtener_nombre_empresa()
+        nombre_institucion_pdf = st.session_state.user_data.get('institucion', 'Institución Financiera')
         presupuestos_cat_pdf = cargar_presupuestos_categoria()
         df_desviacion_pdf = calcular_tabla_desviaciones(st.session_state.gastos_df, presupuestos_cat_pdf)
         buffer_pdf = generar_reporte_pdf_corporativo(
@@ -2094,7 +2366,7 @@ elif menu == "9. Auditoría del Sistema":
     # usuarios/{institucion_id}/auditoria), que es exactamente el aislamiento pedido en
     # el requisito 1. Cualquier usuario autenticado ve su propio historial en tiempo real.
     # --------------------------------------------------------------------------------
-    st.markdown('<p class="main-header">Auditoría y Registro de Actividad</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">🔐 Auditoría y Registro de Actividad (Logs)</p>', unsafe_allow_html=True)
     st.markdown('<p class="sub-header">Historial de control y seguridad institucional.</p>', unsafe_allow_html=True)
     st.markdown("---")
 
@@ -2113,7 +2385,7 @@ elif menu == "9. Auditoría del Sistema":
                 df_logs = pd.DataFrame(logs_lista)
                 columnas_orden = [c for c in ["fecha_hora", "usuario", "accion", "detalle"] if c in df_logs.columns]
                 otras = [c for c in df_logs.columns if c not in columnas_orden]
-                mostrar_tabla_adaptativa(df_logs[columnas_orden + otras], hide_index=True)
+                st.dataframe(df_logs[columnas_orden + otras], use_container_width=True, hide_index=True)
             else:
                 st.info("🔒 Aún no hay movimientos registrados para tu institución. Las acciones (ingresos, gastos, archivos) se registrarán aquí automáticamente.")
         except Exception as e:
@@ -2122,471 +2394,445 @@ elif menu == "9. Auditoría del Sistema":
         st.warning("Conecta Firebase para habilitar la auditoría en la nube.")
 
 elif menu == "10. Facturas (OCR) y Anomalías":
-    st.markdown('<p class="main-header">Comprobantes y revisión</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Carga varios comprobantes juntos. La IA identifica ingresos o gastos; revisa los datos antes de contabilizarlos.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="main-header">Comprobantes, OCR y revisión</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Carga uno o varios recibos de ingreso o gasto. La IA propone el tipo, la categoría y los datos; todo queda pendiente hasta que un aprobador lo revise.</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     gemini_api_key = st.secrets.get("gemini", {}).get("api_key") if "gemini" in st.secrets else None
-    archivos_comprobante = []
-    if not gemini_api_key:
-        st.warning("Falta configurar la clave de Gemini en los secretos de la aplicación ([gemini].api_key).")
-    else:
-        archivos_comprobante = st.file_uploader(
-            "Selecciona comprobantes de ingresos y gastos",
+    puede_subir = tiene_permiso("subir_comprobantes")
+    puede_revisar = tiene_permiso("aprobar_pendientes")
+
+    archivos = []
+    if not gemini_api_key and puede_subir:
+        st.warning("Falta configurar [gemini].api_key en los secrets del proyecto.")
+    elif puede_subir:
+        archivos = st.file_uploader(
+            "Sube recibos, facturas o comprobantes (PNG, JPG, PDF). Puedes seleccionar varios.",
             type=["png", "jpg", "jpeg", "pdf"],
             accept_multiple_files=True,
-            disabled=not tiene_permiso("registrar"),
-            key=f"upload_comprobantes_lote_{get_institucion_id()}",
-            help="Puedes seleccionar varios archivos en una sola carga.",
-        ) or []
-        if archivos_comprobante and st.button("Analizar todos los comprobantes", type="primary", disabled=not tiene_permiso("registrar"), key="analizar_lote_ocr"):
-            lote_id = uuid.uuid4().hex[:12]
-            elementos = []
-            mime_map = {"png": "image/png", "jpg": "image/jpeg", "jpeg": "image/jpeg", "pdf": "application/pdf"}
-            barra = st.progress(0, text="Analizando comprobantes…")
-            for indice, archivo in enumerate(archivos_comprobante):
-                extension = os.path.splitext(archivo.name)[1].lower().lstrip(".")
-                tipo_mime = mime_map.get(extension, archivo.type or "application/octet-stream")
-                contenido = archivo.getvalue()
-                datos_extraidos = extraer_datos_comprobante_gemini(contenido, tipo_mime, gemini_api_key)
-                if datos_extraidos:
-                    elementos.append({
-                        "clave": f"{lote_id}_{indice}",
+            key="upload_comprobantes_lote",
+            help="Hasta 200 MB por archivo; los PDF se limitan a 50 MB por Gemini.",
+        )
+        if archivos and st.button(f"Analizar {len(archivos)} archivo(s) con IA", key="analizar_lote_ocr"):
+            resultados = []
+            mime_por_ext = {
+                ".png": "image/png",
+                ".jpg": "image/jpeg",
+                ".jpeg": "image/jpeg",
+                ".pdf": "application/pdf",
+            }
+            for archivo in archivos:
+                datos_bytes = archivo.getvalue()
+                hash_archivo = hashlib.sha256(datos_bytes).hexdigest()
+                mime = mime_por_ext.get(os.path.splitext(archivo.name)[1].lower(), archivo.type or "application/octet-stream")
+                extraidos = extraer_datos_comprobante_gemini(
+                    datos_bytes, mime, archivo.name, gemini_api_key
+                )
+                if extraidos:
+                    resultados.append({
+                        "hash": hash_archivo,
                         "nombre": archivo.name,
-                        "mime": tipo_mime,
-                        "contenido": contenido,
-                        "datos": datos_extraidos,
+                        "mime": mime,
+                        "datos": extraidos,
                     })
-                barra.progress((indice + 1) / len(archivos_comprobante), text=f"Analizados {indice + 1} de {len(archivos_comprobante)}")
-            st.session_state.ocr_comprobantes = elementos
-            if elementos:
-                st.success(f"Se analizaron {len(elementos)} comprobante(s). Confirma cada movimiento abajo.")
+            st.session_state.ocr_lote = resultados
+            if resultados:
+                st.success(f"Se analizaron {len(resultados)} archivo(s). Confirma cada uno para enviarlo a revisión.")
             else:
-                st.warning("No se pudieron extraer datos. Revisa los archivos e inténtalo de nuevo.")
+                st.warning("No se pudieron extraer datos de los archivos seleccionados.")
 
-    elementos_ocr = st.session_state.get("ocr_comprobantes", [])
-    if elementos_ocr:
-        st.markdown("### Revisa los movimientos detectados")
-        st.caption("Cada ingreso extraído por IA queda pendiente hasta que un usuario autorizado lo apruebe. Los gastos solo se contabilizan directamente si no tienen alertas.")
-        datos_para_procesar = []
-        with st.form("form_confirmar_lote_ocr"):
-            for indice, item in enumerate(elementos_ocr):
-                datos = item.get("datos", {})
-                clave = item["clave"]
-                with st.expander(f"{item['nombre']} — {str(datos.get('tipo', 'gasto')).title()}", expanded=indice == 0):
-                    c1, c2 = st.columns(2)
-                    with c1:
-                        incluir = st.checkbox("Incluir este movimiento", value=True, key=f"ocr_{clave}_incluir")
-                        tipo_movimiento = st.selectbox(
-                            "Tipo de movimiento", ["Ingreso", "Gasto"],
-                            index=0 if datos.get("tipo") == "ingreso" else 1,
-                            key=f"ocr_{clave}_tipo",
+    if "ocr_lote" in st.session_state:
+        archivos_actuales = {
+            hashlib.sha256(a.getvalue()).hexdigest(): a for a in (archivos or [])
+        } if puede_subir else {}
+        if not archivos_actuales:
+            st.info("Vuelve a seleccionar los archivos del lote para confirmar sus datos.")
+        else:
+            for item in list(st.session_state.ocr_lote):
+                item_hash = item["hash"]
+                archivo_original = archivos_actuales.get(item_hash)
+                if not archivo_original:
+                    continue
+                datos = item["datos"]
+                with st.expander(f"{item['nombre']} — confirmar datos", expanded=True):
+                    tipo_sugerido = datos.get("tipo", "Indeterminado")
+                    opciones_tipo = ["Seleccionar tipo", "Ingreso", "Gasto"]
+                    tipo_default = tipo_sugerido if tipo_sugerido in ("Ingreso", "Gasto") else "Seleccionar tipo"
+                    with st.form(f"confirmar_ocr_{item_hash[:12]}"):
+                        tipo_confirmado = st.selectbox(
+                            "Tipo de movimiento", opciones_tipo,
+                            index=opciones_tipo.index(tipo_default),
+                            key=f"tipo_ocr_{item_hash[:12]}",
                         )
-                        concepto = st.text_input("Concepto", value=str(datos.get("concepto") or ""), key=f"ocr_{clave}_concepto")
-                        try:
-                            valor_inicial = float(datos.get("valor") or 0)
-                            if valor_inicial != valor_inicial or valor_inicial < 0:
-                                valor_inicial = 0.0
-                        except (TypeError, ValueError):
-                            valor_inicial = 0.0
-                        valor = st.number_input("Valor en COP", min_value=0.0, value=valor_inicial, step=1000.0, key=f"ocr_{clave}_valor")
-                    with c2:
-                        fecha_texto = datos.get("fecha")
-                        try:
-                            fecha_inicial = dt_module.date.fromisoformat(str(fecha_texto)) if fecha_texto else dt_module.date.today()
-                        except (TypeError, ValueError):
-                            fecha_inicial = dt_module.date.today()
-                        fecha = st.date_input("Fecha", value=fecha_inicial, key=f"ocr_{clave}_fecha")
-                        responsable = st.text_input("Responsable", value=obtener_nombre_usuario_actual(), key=f"ocr_{clave}_responsable")
-                        categoria_sugerida = datos.get("categoria_sugerida")
-                        indice_categoria = CATEGORIAS_GASTO.index(categoria_sugerida) if categoria_sugerida in CATEGORIAS_GASTO else CATEGORIAS_GASTO.index("Varios")
-                        categoria = st.selectbox("Categoría (para gastos)", CATEGORIAS_GASTO, index=indice_categoria, key=f"ocr_{clave}_categoria")
-                    observaciones = st.text_area("Observaciones", value=str(datos.get("observaciones") or ""), key=f"ocr_{clave}_observaciones")
-                    if item["mime"].startswith("image/"):
-                        st.image(item["contenido"], caption="Comprobante original", width=260)
-                    else:
-                        st.caption(f"PDF adjunto: {item['nombre']}")
-                    datos_para_procesar.append({
-                        "clave": clave, "incluir": incluir, "tipo": tipo_movimiento,
-                        "concepto": concepto.strip(), "valor": float(valor), "fecha": fecha,
-                        "responsable": responsable, "categoria": categoria,
-                        "observaciones": observaciones, "nombre": item["nombre"],
-                        "mime": item["mime"], "contenido": item["contenido"],
-                        "numero_factura": datos.get("numero_factura"),
-                    })
-            procesar_lote = st.form_submit_button("Procesar movimientos seleccionados", type="primary")
-
-        if procesar_lote:
-            if not tiene_permiso("registrar"):
-                st.error("Tu rango no tiene permiso para registrar comprobantes.")
-            else:
-                exitosos = 0
-                pendientes_ingreso = 0
-                errores = []
-                claves_procesadas = set()
-                presupuesto_categoria_actual = cargar_presupuestos_categoria()
-                ingresos_para_analisis = st.session_state.ingresos_df.copy()
-                gastos_para_analisis = st.session_state.gastos_df.copy()
-                for candidato in datos_para_procesar:
-                    if not candidato["incluir"]:
-                        continue
-                    if not candidato["concepto"] or candidato["valor"] <= 0:
-                        errores.append(f"{candidato['nombre']}: el concepto y un valor mayor que cero son obligatorios.")
-                        continue
-                    tipo = candidato["tipo"]
-                    prefijo = "ING" if tipo == "Ingreso" else "GAS"
-                    registro_id = f"{prefijo}-{candidato['clave']}"
-                    ruta_archivo = guardar_comprobante_nube(candidato["nombre"], candidato["mime"], candidato["contenido"], registro_id)
-                    if bucket and not ruta_archivo:
-                        st.warning(f"No se pudo conservar en almacenamiento el original de {candidato['nombre']}; se guardarán los datos extraídos.")
-
-                    if tipo == "Ingreso":
-                        motivos = detectar_anomalias_ingreso(
-                            candidato["valor"], candidato["fecha"].isoformat(), candidato["concepto"], ingresos_para_analisis
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            concepto_confirmado = st.text_input(
+                                "Concepto", value=str(datos.get("concepto") or ""),
+                                key=f"concepto_ocr_{item_hash[:12]}",
+                            )
+                            try:
+                                valor_default = float(datos.get("valor") or 0)
+                            except (TypeError, ValueError):
+                                valor_default = 0.0
+                            valor_confirmado = st.number_input(
+                                "Valor (COP)", min_value=0.0, value=max(0.0, valor_default),
+                                step=1000.0, key=f"valor_ocr_{item_hash[:12]}",
+                            )
+                        with c2:
+                            try:
+                                fecha_default = dt_module.date.fromisoformat(str(datos.get("fecha")))
+                            except (TypeError, ValueError):
+                                fecha_default = dt_module.date.today()
+                            fecha_confirmada = st.date_input(
+                                "Fecha del comprobante", value=fecha_default,
+                                key=f"fecha_ocr_{item_hash[:12]}",
+                            )
+                            responsable = st.selectbox(
+                                "Responsable", obtener_lista_responsables(),
+                                key=f"responsable_ocr_{item_hash[:12]}",
+                            )
+                        categoria = None
+                        if tipo_confirmado == "Gasto":
+                            sugerida = datos.get("categoria_sugerida", "Varios")
+                            categoria = st.selectbox(
+                                "Categoría sugerida por IA", CATEGORIAS_GASTO,
+                                index=CATEGORIAS_GASTO.index(sugerida) if sugerida in CATEGORIAS_GASTO else 0,
+                                key=f"categoria_ocr_{item_hash[:12]}",
+                            )
+                        observaciones = st.text_area(
+                            "Observaciones / referencia",
+                            value=str(datos.get("observaciones") or ""),
+                            key=f"observaciones_ocr_{item_hash[:12]}",
                         )
-                        ingresos_para_analisis = pd.concat([ingresos_para_analisis, pd.DataFrame([{
-                            "Fecha": candidato["fecha"].isoformat(), "Concepto": candidato["concepto"], "Valor": candidato["valor"]
-                        }])], ignore_index=True)
-                        motivos.insert(0, "Ingreso extraído por IA: requiere revisión humana antes de entrar al balance.")
-                        pendiente_id = f"PEND-ING-{candidato['clave']}"
-                        pendiente = {
-                            "ID": pendiente_id, "Fecha": candidato["fecha"].isoformat(),
-                            "Concepto": candidato["concepto"], "Valor": candidato["valor"],
-                            "Responsable": candidato["responsable"], "Observaciones": candidato["observaciones"],
-                            "Motivos": motivos, "Estado": "Pendiente", "Ruta_Archivo": ruta_archivo,
-                            "Nombre_Archivo": candidato["nombre"],
-                        }
-                        try:
-                            empresa_id = get_institucion_id()
-                            db.collection("usuarios").document(empresa_id).collection("ingresos_pendientes").document(pendiente_id).set(pendiente)
-                            registrar_auditoria("Ingreso OCR enviado a revisión", f"{candidato['concepto']} - ${candidato['valor']:,.0f}")
-                            pendientes_ingreso += 1
-                            exitosos += 1
-                            claves_procesadas.add(candidato["clave"])
-                        except Exception as e:
-                            errores.append(f"{candidato['nombre']}: no se pudo guardar el ingreso pendiente ({e}).")
-                    else:
-                        motivos = detectar_anomalias_gasto(
-                            candidato["valor"], candidato["fecha"].isoformat(), candidato["concepto"], candidato["categoria"],
-                            gastos_para_analisis, presupuesto_tope, presupuesto_categoria_actual,
-                        )
-                        gastos_para_analisis = pd.concat([gastos_para_analisis, pd.DataFrame([{
-                            "Fecha": candidato["fecha"].isoformat(), "Concepto": candidato["concepto"],
-                            "Categoría": candidato["categoria"], "Valor": candidato["valor"],
-                        }])], ignore_index=True)
-                        registro = {
-                            "ID": registro_id, "Fecha": candidato["fecha"].isoformat(),
-                            "Concepto": candidato["concepto"], "Categoría": candidato["categoria"],
-                            "Valor": candidato["valor"], "Responsable": candidato["responsable"],
-                            "Observaciones": candidato["observaciones"], "Numero_Factura": candidato["numero_factura"],
-                            "Ruta_Archivo": ruta_archivo, "Nombre_Archivo": candidato["nombre"],
-                        }
-                        try:
-                            if motivos:
-                                pendiente_id = f"PEND-GAS-{candidato['clave']}"
-                                registro.update({"ID": pendiente_id, "Motivos": motivos, "Estado": "Pendiente"})
-                                empresa_id = get_institucion_id()
-                                db.collection("usuarios").document(empresa_id).collection("gastos_pendientes").document(pendiente_id).set(registro)
-                                registrar_auditoria("Gasto OCR enviado a revisión", f"{candidato['concepto']} - ${candidato['valor']:,.0f} — {'; '.join(motivos)}")
-                            elif not guardar_registro_nube("gastos", registro):
-                                raise RuntimeError("no se pudo guardar en la nube")
-                            else:
-                                registrar_auditoria("Registró Gasto desde comprobante OCR", f"{candidato['concepto']} - ${candidato['valor']:,.0f}")
-                            exitosos += 1
-                            claves_procesadas.add(candidato["clave"])
-                        except Exception as e:
-                            errores.append(f"{candidato['nombre']}: no se pudo guardar el gasto ({e}).")
+                        enviar = st.form_submit_button("Enviar a revisión")
 
-                if claves_procesadas:
-                    st.session_state.ocr_comprobantes = [x for x in elementos_ocr if x["clave"] not in claves_procesadas]
-                    cargar_datos_nube()
-                    st.success(f"Procesados {exitosos} movimiento(s); {pendientes_ingreso} ingreso(s) esperan aprobación.")
-                for error in errores:
-                    st.error(error)
-                if claves_procesadas and not errores:
-                    st.rerun()
+                    if enviar:
+                        if tipo_confirmado not in ("Ingreso", "Gasto"):
+                            st.error("Confirma si el movimiento es un ingreso o un gasto.")
+                        elif not concepto_confirmado.strip() or valor_confirmado <= 0:
+                            st.error("Completa un concepto y un valor mayor que cero.")
+                        elif not tiene_permiso("registrar"):
+                            st.error("Tu rango no permite enviar movimientos a revisión.")
+                        else:
+                            try:
+                                ruta_evidencia = subir_evidencia_comprobante(
+                                    archivo_original.getvalue(), item["nombre"], item["mime"]
+                                )
+                                movimiento = {
+                                    "Fecha": fecha_confirmada.isoformat(),
+                                    "Concepto": concepto_confirmado.strip(),
+                                    "Valor": float(valor_confirmado),
+                                    "Responsable": responsable,
+                                    "Observaciones": observaciones,
+                                    "Categoría": categoria if tipo_confirmado == "Gasto" else "",
+                                    "Numero_Factura": datos.get("numero_factura"),
+                                    "Hash_Evidencia": item_hash,
+                                }
+                                if tipo_confirmado == "Gasto":
+                                    motivos = detectar_anomalias_gasto(
+                                        movimiento["Valor"], movimiento["Fecha"], movimiento["Concepto"],
+                                        movimiento["Categoría"], st.session_state.gastos_df,
+                                        presupuesto_tope, cargar_presupuestos_categoria(),
+                                    )
+                                else:
+                                    motivos = detectar_anomalias_ingreso(
+                                        movimiento["Valor"], movimiento["Fecha"], movimiento["Concepto"],
+                                        st.session_state.ingresos_df,
+                                    )
+                                motivos = ["Requiere aprobación humana antes de contabilizarse."] + motivos
+                                pendiente_id = guardar_pendiente_movimiento(
+                                    tipo_confirmado, movimiento, motivos, origen="OCR con IA",
+                                    evidencia_ruta=ruta_evidencia,
+                                    evidencia_nombre=item["nombre"], evidencia_mime=item["mime"],
+                                )
+                                if not pendiente_id:
+                                    raise RuntimeError("No se pudo crear el pendiente en Firestore.")
+                                registrar_auditoria(
+                                    f"Envió {tipo_confirmado} OCR a revisión",
+                                    f"{concepto_confirmado.strip()} - {valor_confirmado:,.0f} COP",
+                                )
+                                st.session_state.ocr_lote = [
+                                    x for x in st.session_state.ocr_lote if x["hash"] != item_hash
+                                ]
+                                st.success(f"{tipo_confirmado} enviado a revisión. No se suma al balance hasta ser aprobado.")
+                                st.rerun()
+                            except Exception as e:
+                                detalle_error = str(e)
+                                if "does not exist" in detalle_error.lower() or "notfound" in detalle_error.lower():
+                                    bucket_nombre = getattr(bucket, "name", FIREBASE_STORAGE_BUCKET or "sin configurar")
+                                    st.error(
+                                        f"El bucket de Firebase Storage '{bucket_nombre}' no existe. "
+                                        "En Firebase Console > Storage > Files copia el nombre exacto y configúralo "
+                                        "en Streamlit secrets como [firebase] storage_bucket = \"nombre-real-del-bucket\". "
+                                        "Si aún no tienes bucket, créalo primero en Storage."
+                                    )
+                                else:
+                                    st.error(f"No se pudo enviar el comprobante a revisión: {detalle_error}")
 
     st.markdown("---")
     st.markdown("### Ingresos y gastos pendientes de revisión")
-    if not tiene_permiso("ver_finanzas"):
-        st.info("Tu rango no tiene permiso para consultar los movimientos financieros.")
-    elif db:
-        empresa_id = get_institucion_id()
+    if not db:
+        st.warning("Conecta Firebase para consultar las revisiones.")
+    else:
+        institucion_id = get_institucion_id()
         try:
-            gastos_pend_ref = db.collection("usuarios").document(empresa_id).collection("gastos_pendientes").where("Estado", "==", "Pendiente").stream()
-            ingresos_pend_ref = db.collection("usuarios").document(empresa_id).collection("ingresos_pendientes").where("Estado", "==", "Pendiente").stream()
-            pendientes_lista = ([{**p.to_dict(), "Tipo": "Gasto"} for p in gastos_pend_ref]
-                                + [{**p.to_dict(), "Tipo": "Ingreso"} for p in ingresos_pend_ref])
-            if not pendientes_lista:
-                st.info("No hay ingresos ni gastos pendientes de revisión en esta empresa.")
+            base_ref = db.collection("usuarios").document(institucion_id)
+            gastos_docs = base_ref.collection("gastos_pendientes").where("Estado", "==", "Pendiente").limit(100).stream()
+            ingresos_docs = base_ref.collection("ingresos_pendientes").where("Estado", "==", "Pendiente").limit(100).stream()
+            pendientes = (
+                [{**(p.to_dict() or {}), "Tipo": "Gasto"} for p in gastos_docs]
+                + [{**(p.to_dict() or {}), "Tipo": "Ingreso"} for p in ingresos_docs]
+            )
+            if not pendientes:
+                st.info("No hay ingresos ni gastos pendientes de revisión.")
             else:
-                for pendiente in pendientes_lista:
-                    es_gasto = pendiente["Tipo"] == "Gasto"
-                    tipo_vista = "Gasto" if es_gasto else "Ingreso"
-                    concepto_pend = pendiente.get("Concepto", "Sin concepto")
-                    valor_pend = float(pendiente.get("Valor", 0) or 0)
-                    fecha_pend = pendiente.get("Fecha", "")
-                    with st.expander(f"{tipo_vista} · {concepto_pend} · ${valor_pend:,.0f} · {fecha_pend}"):
-                        if es_gasto:
-                            st.write(f"**Categoría:** {pendiente.get('Categoría', '—')}  |  **Responsable:** {pendiente.get('Responsable', '—')}")
-                            if pendiente.get("Numero_Factura"):
-                                st.write(f"**N.° de factura:** {pendiente['Numero_Factura']}")
+                if len(pendientes) >= 200:
+                    st.caption("Se muestran hasta 100 pendientes por tipo. Al aprobar o rechazar, se cargarán los siguientes.")
+                for pendiente in pendientes:
+                    tipo = pendiente["Tipo"]
+                    prefijo_tipo = "🔴 Gasto" if tipo == "Gasto" else "🟢 Ingreso"
+                    concepto = pendiente.get("Concepto", "Sin concepto")
+                    valor = float(pendiente.get("Valor", 0) or 0)
+                    fecha = pendiente.get("Fecha", "")
+                    with st.expander(f"{prefijo_tipo} — {concepto} — {chr(36)}{valor:,.0f} ({fecha})"):
+                        if tipo == "Gasto":
+                            st.write(f"**Categoría:** {pendiente.get('Categoría', 'Varios')} | **Responsable:** {pendiente.get('Responsable', '')}")
                         else:
-                            st.write(f"**Responsable:** {pendiente.get('Responsable', '—')}")
-                            if pendiente.get("Observaciones"):
-                                st.write(f"**Observaciones:** {pendiente['Observaciones']}")
-                        if pendiente.get("Motivos"):
-                            st.markdown("**Motivos de revisión**")
-                            for motivo in pendiente["Motivos"]:
-                                st.caption(f"• {motivo}")
-                        ruta_archivo = pendiente.get("Ruta_Archivo")
-                        prefijo_archivos_empresa = f"empresas/{empresa_id}/comprobantes/"
-                        if ruta_archivo and ruta_archivo.startswith(prefijo_archivos_empresa) and bucket:
+                            st.write(f"**Responsable:** {pendiente.get('Responsable', '')}")
+                            rel_pendiente = calcular_relacion_presupuesto(
+                                pd.to_numeric(st.session_state.ingresos_df.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum() + valor,
+                                pd.to_numeric(st.session_state.gastos_df.get("Valor", pd.Series(dtype=float)), errors="coerce").fillna(0).sum(),
+                                presupuesto_tope,
+                            )
+                            st.caption("Si se aprueba, " + rel_pendiente["mensaje"])
+                        if pendiente.get("Observaciones"):
+                            st.write(f"**Observaciones:** {pendiente['Observaciones']}")
+                        st.caption(f"Origen: {pendiente.get('Origen', 'Registro')} | Enviado por: {pendiente.get('creado_por', '—')}")
+                        if pendiente.get("EvidenciaStoragePath") and puede_revisar:
                             try:
-                                archivo_original = bucket.blob(ruta_archivo).download_as_bytes()
-                                if pendiente.get("Nombre_Archivo", "").lower().endswith((".png", ".jpg", ".jpeg")):
-                                    st.image(archivo_original, caption="Comprobante original", width=300)
-                                else:
-                                    st.download_button("Descargar comprobante original", archivo_original, file_name=pendiente.get("Nombre_Archivo", "comprobante.pdf"), key=f"descarga_pend_{pendiente['ID']}")
-                            except Exception:
-                                st.caption("El archivo original no está disponible en almacenamiento.")
+                                evidencia = descargar_evidencia_comprobante(pendiente["EvidenciaStoragePath"])
+                                if evidencia:
+                                    st.download_button(
+                                        "Descargar comprobante original",
+                                        data=evidencia,
+                                        file_name=pendiente.get("EvidenciaNombre", "comprobante"),
+                                        mime=pendiente.get("EvidenciaMime", "application/octet-stream"),
+                                        key=f"evidencia_{pendiente['ID']}",
+                                    )
+                            except Exception as e:
+                                st.warning(f"No se pudo abrir el comprobante original: {e}")
+                        for motivo in pendiente.get("Motivos", []):
+                            st.caption("• " + str(motivo))
 
-                        if not tiene_permiso("aprobar_pendientes"):
-                            st.caption("Tu rango permite consultar, pero no aprobar. Solicita la revisión a un gerente autorizado.")
+                        if not puede_revisar:
+                            st.caption("Tu rango puede consultar la solicitud, pero no aprobarla ni rechazarla.")
                         else:
                             col_aprobar, col_rechazar = st.columns(2)
-                            coleccion_pend = "gastos_pendientes" if es_gasto else "ingresos_pendientes"
-                            coleccion_final = "gastos" if es_gasto else "ingresos"
-                            reg_id = f"APROB-{pendiente['ID']}"
+                            coleccion_pend = "gastos_pendientes" if tipo == "Gasto" else "ingresos_pendientes"
+                            coleccion_final = "gastos" if tipo == "Gasto" else "ingresos"
                             with col_aprobar:
-                                if st.button("Aprobar y registrar", key=f"aprobar_{pendiente['ID']}"):
+                                if st.button("Aprobar y contabilizar", key=f"aprobar_{pendiente['ID']}"):
                                     nuevo_reg = {
-                                        "ID": reg_id, "Fecha": pendiente.get("Fecha", ""),
-                                        "Concepto": pendiente.get("Concepto", ""), "Valor": valor_pend,
-                                        "Responsable": pendiente.get("Responsable", ""),
-                                        "Observaciones": pendiente.get("Observaciones", ""),
-                                        "Ruta_Archivo": pendiente.get("Ruta_Archivo"),
-                                        "Nombre_Archivo": pendiente.get("Nombre_Archivo"),
+                                        k: pendiente[k] for k in (
+                                            "Fecha", "Concepto", "Categoría", "Valor", "Responsable",
+                                            "Observaciones", "Numero_Factura", "Origen",
+                                            "EvidenciaStoragePath", "EvidenciaNombre", "Hash_Evidencia",
+                                        ) if k in pendiente
                                     }
-                                    if es_gasto:
-                                        nuevo_reg["Categoría"] = pendiente.get("Categoría", "Varios")
-                                        nuevo_reg["Numero_Factura"] = pendiente.get("Numero_Factura")
+                                    nuevo_reg["ID"] = generar_id("GAS" if tipo == "Gasto" else "ING")
                                     try:
-                                        lote = db.batch()
-                                        lote.set(db.collection("usuarios").document(empresa_id).collection(coleccion_final).document(reg_id), nuevo_reg)
-                                        lote.update(db.collection("usuarios").document(empresa_id).collection(coleccion_pend).document(pendiente["ID"]), {
-                                            "Estado": "Aprobado", "Aprobado_por": st.session_state.user_data.get("email"),
-                                            "Fecha_revision": dt_module.datetime.now().isoformat(),
+                                        ref_pend = base_ref.collection(coleccion_pend).document(pendiente["ID"])
+                                        ref_final = base_ref.collection(coleccion_final).document(nuevo_reg["ID"])
+                                        batch = db.batch()
+                                        batch.set(ref_final, nuevo_reg)
+                                        batch.update(ref_pend, {
+                                            "Estado": "Aprobado",
+                                            "revisado_por": (st.session_state.user_data or {}).get("email", ""),
+                                            "revisado_en": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
                                         })
-                                        lote.commit()
-                                        registrar_auditoria(f"Aprobó {tipo_vista} pendiente", f"{concepto_pend} - ${valor_pend:,.0f}")
+                                        batch.commit()
+                                        registrar_auditoria(f"Aprobó {tipo} pendiente", f"{concepto} - {valor:,.0f} COP")
                                         cargar_datos_nube()
-                                        st.success(f"{tipo_vista} aprobado y registrado en el balance.")
+                                        st.success(f"{tipo} aprobado y contabilizado.")
                                         st.rerun()
                                     except Exception as e:
-                                        st.error(f"No se pudo aprobar el movimiento; sigue pendiente: {e}")
+                                        st.error(f"No se pudo aprobar el pendiente: {e}")
                             with col_rechazar:
                                 if st.button("Rechazar", key=f"rechazar_{pendiente['ID']}"):
                                     try:
-                                        db.collection("usuarios").document(empresa_id).collection(coleccion_pend).document(pendiente["ID"]).update({
-                                            "Estado": "Rechazado", "Rechazado_por": st.session_state.user_data.get("email"),
-                                            "Fecha_revision": dt_module.datetime.now().isoformat(),
+                                        base_ref.collection(coleccion_pend).document(pendiente["ID"]).update({
+                                            "Estado": "Rechazado",
+                                            "revisado_por": (st.session_state.user_data or {}).get("email", ""),
+                                            "revisado_en": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
                                         })
-                                        registrar_auditoria(f"Rechazó {tipo_vista} pendiente", f"{concepto_pend} - ${valor_pend:,.0f}")
-                                        st.info(f"{tipo_vista} rechazado; queda en el historial sin contabilizarse.")
+                                        registrar_auditoria(f"Rechazó {tipo} pendiente", f"{concepto} - {valor:,.0f} COP")
                                         st.rerun()
                                     except Exception as e:
-                                        st.error(f"No se pudo rechazar el movimiento: {e}")
+                                        st.error(f"No se pudo rechazar el pendiente: {e}")
         except Exception as e:
             st.warning(f"No se pudieron cargar los pendientes: {e}")
-    else:
-        st.warning("Conecta Firebase para habilitar esta sección.")
 
 elif menu == "11. Gestión de Equipo":
     st.markdown('<p class="main-header">Equipo y rangos de acceso</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Administra las personas vinculadas al correo base de esta empresa y define qué puede hacer cada rango.</p>', unsafe_allow_html=True)
+    st.markdown('<p class="sub-header">Invita correos a la nube de esta empresa y define cargos con permisos claros.</p>', unsafe_allow_html=True)
     st.markdown("---")
 
     if not tiene_permiso("gestionar_equipo"):
-        st.error("No tienes permiso para administrar el equipo de la empresa.")
+        st.error("Tu rango no permite administrar el equipo.")
     elif not db:
-        st.warning("Conecta Firebase para habilitar la gestión del equipo.")
+        st.warning("Conecta Firebase para gestionar el equipo.")
     else:
-        empresa_id = get_institucion_id()
-        nombre_empresa = obtener_nombre_empresa()
-        st.info(f"**Empresa:** {nombre_empresa}  ·  **Correo base de la nube:** {empresa_id}")
-
-        if tiene_permiso("gestionar_roles"):
-            with st.expander("⚙️ Crear y configurar rangos", expanded=True):
-                roles_actuales = obtener_configuracion_roles(forzar=True)
-                roles_personalizados = [r for r in sorted(roles_actuales) if r not in ROLES_BASE and r != "Propietario"]
-                opcion_edicion = st.selectbox("Rango que deseas editar", ["Crear un rango nuevo"] + roles_personalizados, key=f"selector_rango_edicion_{empresa_id}")
-                valor_nombre = "" if opcion_edicion == "Crear un rango nuevo" else opcion_edicion
-                permisos_iniciales = [] if not valor_nombre else roles_actuales.get(valor_nombre, [])
-                with st.form(f"form_configurar_rango_{empresa_id}"):
-                    nombre_rango = st.text_input("Nombre del rango", value=valor_nombre, max_chars=60)
-                    permisos_rango = st.multiselect(
-                        "Funciones de este rango",
-                        options=list(PERMISOS_DISPONIBLES),
-                        default=[p for p in permisos_iniciales if p in PERMISOS_DISPONIBLES],
-                        format_func=lambda permiso: PERMISOS_DISPONIBLES[permiso],
+        institucion_id = get_institucion_id()
+        roles_custom = cargar_roles_personalizados()
+        permisos_legibles = {
+            clave: f"{clave}: {texto}" for clave, texto in PERMISOS_DISPONIBLES.items()
+        }
+        with st.expander("Crear rango personalizado", expanded=True):
+            with st.form("form_crear_rango"):
+                nombre_rango = st.text_input(
+                    "Nombre del rango",
+                    help="Usa de 2 a 40 letras, números, espacios o guiones.",
+                )
+                permisos_nuevos = st.multiselect(
+                    "Funciones del rango",
+                    options=list(PERMISOS_DISPONIBLES.keys()),
+                    format_func=lambda p: permisos_legibles[p],
+                )
+                guardar_rango = st.form_submit_button("Guardar rango")
+            if guardar_rango:
+                nombre_rango = nombre_rango.strip()
+                if not re.fullmatch(r"[A-Za-z0-9ÁÉÍÓÚÜÑáéíóúüñ _-]{2,40}", nombre_rango):
+                    st.error("Escribe un nombre de rango válido (2 a 40 caracteres).")
+                elif nombre_rango in ROLES_DISPONIBLES:
+                    st.error("Ese nombre está reservado para un rango integrado.")
+                else:
+                    roles_custom[nombre_rango] = {"permisos": sorted(set(permisos_nuevos))}
+                    db.collection("usuarios").document(institucion_id).set(
+                        {"roles_personalizados": roles_custom}, merge=True
                     )
-                    guardar_rango = st.form_submit_button("Guardar rango")
-                if guardar_rango:
-                    nombre_limpio = nombre_rango.strip()
-                    nombre_anterior = None if opcion_edicion == "Crear un rango nuevo" else opcion_edicion
-                    ocupados = set(ROLES_BASE) | {"Propietario"}
-                    if not nombre_limpio:
-                        st.error("Escribe un nombre para el rango.")
-                    elif nombre_limpio in ocupados:
-                        st.error("Ese nombre está reservado para un rango base.")
-                    elif nombre_limpio in roles_personalizados and nombre_limpio != nombre_anterior:
-                        st.error("Ya existe un rango con ese nombre.")
-                    else:
-                        doc_empresa = db.collection("usuarios").document(empresa_id)
-                        datos_empresa = doc_empresa.get().to_dict() or {}
-                        config_guardada = datos_empresa.get("roles_config", {})
-                        if not isinstance(config_guardada, dict):
-                            config_guardada = {}
-                        if nombre_anterior:
-                            config_guardada.pop(nombre_anterior, None)
-                        config_guardada[nombre_limpio] = list(permisos_rango)
-                        try:
-                            doc_empresa.set({"roles_config": config_guardada}, merge=True)
-                            if nombre_anterior and nombre_anterior != nombre_limpio:
-                                miembros = doc_empresa.collection("empleados").where("rol", "==", nombre_anterior).stream()
-                                for miembro_doc in miembros:
-                                    miembro = miembro_doc.to_dict() or {}
-                                    correo_miembro = miembro.get("email", miembro_doc.id)
-                                    miembro_doc.reference.update({"rol": nombre_limpio})
-                                    cuenta_miembro_ref = db.collection("usuarios").document(correo_miembro)
-                                    if cuenta_miembro_ref.get().exists:
-                                        cuenta_miembro_ref.set({"rol": nombre_limpio}, merge=True)
-                                    db.collection("empleados_index").document(correo_miembro).set({"rol": nombre_limpio}, merge=True)
-                            st.session_state.roles_empresa_cache = None
-                            registrar_auditoria("Configuró rango de empresa", nombre_limpio)
-                            st.success(f"Rango '{nombre_limpio}' guardado.")
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"No se pudo guardar el rango: {e}")
+                    registrar_auditoria("Guardó rango personalizado", nombre_rango)
+                    st.success("Rango guardado.")
+                    st.rerun()
 
-                if roles_personalizados:
-                    st.markdown("#### Eliminar un rango")
-                    rango_eliminar = st.selectbox("Rango personalizado", roles_personalizados, key=f"selector_rango_eliminar_{empresa_id}")
-                    if st.button("Eliminar rango", key=f"eliminar_rango_empresa_{empresa_id}"):
-                        miembros_en_rango = list(db.collection("usuarios").document(empresa_id).collection("empleados").where("rol", "==", rango_eliminar).limit(1).stream())
-                        if miembros_en_rango:
-                            st.error("No se puede eliminar mientras haya integrantes asignados. Cambia sus rangos primero.")
-                        else:
-                            datos_empresa = db.collection("usuarios").document(empresa_id).get().to_dict() or {}
-                            config_guardada = datos_empresa.get("roles_config", {})
-                            config_guardada.pop(rango_eliminar, None)
-                            db.collection("usuarios").document(empresa_id).set({"roles_config": config_guardada}, merge=True)
-                            st.session_state.roles_empresa_cache = None
-                            registrar_auditoria("Eliminó rango de empresa", rango_eliminar)
-                            st.success("Rango eliminado.")
+        if roles_custom:
+            st.markdown("### Rangos personalizados")
+            for nombre, config in roles_custom.items():
+                with st.expander(nombre):
+                    seleccionados = [
+                        p for p in config.get("permisos", [])
+                        if p in PERMISOS_DISPONIBLES
+                    ]
+                    key_rango = hashlib.sha256(nombre.encode()).hexdigest()[:12]
+                    permisos_editados = st.multiselect(
+                        "Funciones", options=list(PERMISOS_DISPONIBLES.keys()),
+                        default=seleccionados,
+                        format_func=lambda p: permisos_legibles[p],
+                        key=f"permisos_rango_{key_rango}",
+                    )
+                    col_guardar_rol, col_borrar_rol = st.columns(2)
+                    with col_guardar_rol:
+                        if st.button("Actualizar permisos", key=f"actualizar_rango_{key_rango}"):
+                            roles_custom[nombre] = {"permisos": sorted(set(permisos_editados))}
+                            db.collection("usuarios").document(institucion_id).set(
+                                {"roles_personalizados": roles_custom}, merge=True
+                            )
+                            registrar_auditoria("Actualizó permisos de rango", nombre)
+                            st.success("Permisos actualizados.")
                             st.rerun()
-
-        roles_asignables = [r for r in obtener_nombres_roles() if r != "Propietario"]
-        if not roles_asignables:
-            st.warning("Crea un rango antes de invitar integrantes.")
-        else:
-            with st.expander("➕ Invitar integrante por correo", expanded=True):
-                with st.form(f"form_invitar_empleado_{empresa_id}"):
-                    correo_nuevo = st.text_input("Correo del integrante")
-                    nombre_nuevo = st.text_input("Nombre (opcional)")
-                    rol_nuevo = st.selectbox("Rango", roles_asignables)
-                    enviar_invitacion = st.form_submit_button("Vincular correo a la empresa")
-                if enviar_invitacion:
-                    correo_limpio = correo_nuevo.lower().strip()
-                    if not correo_limpio or "@" not in correo_limpio or "." not in correo_limpio.split("@")[-1]:
-                        st.error("Ingresa un correo electrónico válido.")
-                    elif correo_limpio == empresa_id:
-                        st.error("Ese correo ya es el correo base de la empresa.")
-                    else:
-                        try:
-                            indice_ref = db.collection("empleados_index").document(correo_limpio)
-                            indice_doc = indice_ref.get()
-                            indice_actual = indice_doc.to_dict() or {}
-                            cuenta_doc = db.collection("usuarios").document(correo_limpio).get()
-                            cuenta = cuenta_doc.to_dict() or {}
-                            empresa_cuenta = (cuenta.get("empresa_id") or cuenta.get("email") or "").lower().strip()
-                            if indice_doc.exists and indice_actual.get("empresa_id") != empresa_id:
-                                st.error("Ese correo ya está vinculado a otra empresa.")
-                            elif cuenta_doc.exists and empresa_cuenta != empresa_id:
-                                st.error("Ese correo ya tiene una cuenta personal o pertenece a otra empresa.")
+                    with col_borrar_rol:
+                        if st.button("Eliminar rango", key=f"eliminar_rango_{key_rango}"):
+                            miembros = db.collection("usuarios").document(institucion_id).collection("empleados").where("rol", "==", nombre).limit(1).stream()
+                            if next(iter(miembros), None):
+                                st.error("No se puede eliminar: hay empleados asignados a este rango.")
                             else:
-                                empleado_doc = {
-                                    "email": correo_limpio,
-                                    "nombre": nombre_nuevo.strip() or cuenta.get("institucion") or correo_limpio,
-                                    "rol": rol_nuevo,
-                                    "estado": "Activo",
-                                    "fecha_invitacion": dt_module.datetime.now().isoformat(),
-                                }
-                                db.collection("usuarios").document(empresa_id).collection("empleados").document(correo_limpio).set(empleado_doc, merge=True)
-                                indice_ref.set({"empresa_id": empresa_id, "rol": rol_nuevo, "nombre_empresa": nombre_empresa}, merge=True)
-                                if cuenta_doc.exists:
-                                    db.collection("usuarios").document(correo_limpio).set({"empresa_id": empresa_id, "rol": rol_nuevo}, merge=True)
-                                registrar_auditoria("Vinculó integrante a empresa", f"{correo_limpio} — {rol_nuevo}")
-                                st.success(f"{correo_limpio} quedó vinculado como {rol_nuevo}. Si aún no tiene cuenta, debe crearla con ese mismo correo.")
+                                roles_custom.pop(nombre, None)
+                                db.collection("usuarios").document(institucion_id).set(
+                                    {"roles_personalizados": roles_custom}, merge=True
+                                )
+                                registrar_auditoria("Eliminó rango personalizado", nombre)
                                 st.rerun()
-                        except Exception as e:
-                            st.error(f"No se pudo guardar la invitación: {e}")
 
-        st.markdown("### Integrantes vinculados")
-        if "equipo_mostrar_hasta" not in st.session_state:
-            st.session_state.equipo_mostrar_hasta = 100
-        limite_miembros = st.session_state.equipo_mostrar_hasta
-        miembros = []
+        roles_asignables = obtener_roles_asignables()
+        with st.expander("Invitar empleado", expanded=True):
+            with st.form("form_invitar_empleado"):
+                correo_nuevo = st.text_input("Correo de la persona")
+                nombre_nuevo = st.text_input("Nombre (opcional)")
+                rol_nuevo = st.selectbox("Rango", roles_asignables)
+                invitar = st.form_submit_button("Invitar")
+            if invitar:
+                correo_limpio = correo_nuevo.lower().strip()
+                if not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", correo_limpio):
+                    st.error("Escribe un correo válido.")
+                elif correo_limpio == institucion_id:
+                    st.error("Ese correo ya es el propietario de esta empresa.")
+                else:
+                    nombre_empresa = (st.session_state.user_data or {}).get("institucion", "")
+                    miembro_ref = db.collection("usuarios").document(institucion_id).collection("empleados").document(correo_limpio)
+                    miembro_ref.set({
+                        "email": correo_limpio,
+                        "nombre": nombre_nuevo.strip() or correo_limpio,
+                        "rol": rol_nuevo,
+                        "estado": "Activo",
+                        "fecha_invitacion": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
+                    })
+                    db.collection("empleados_index").document(correo_limpio).set({
+                        "empresa_id": institucion_id,
+                        "rol": rol_nuevo,
+                        "nombre_empresa": nombre_empresa,
+                    })
+                    registrar_auditoria("Invitó empleado", f"{correo_limpio} — {rol_nuevo}")
+                    st.success(f"{correo_limpio} fue invitado como {rol_nuevo}.")
+                    st.rerun()
+
+        st.markdown("### Equipo de la empresa")
         try:
-            miembros = [m.to_dict() or {} for m in db.collection("usuarios").document(empresa_id).collection("empleados").order_by("email").limit(limite_miembros).stream()]
-            if not miembros:
-                st.info("Aún no hay integrantes vinculados a esta nube empresarial.")
-            for miembro in miembros:
-                correo_miembro = miembro.get("email", "")
-                nombre_miembro = miembro.get("nombre") or correo_miembro
-                estado = miembro.get("estado", "Activo")
-                with st.expander(f"{nombre_miembro} · {miembro.get('rol', 'Analista')} · {estado}"):
-                    st.write(f"**Correo:** {correo_miembro}")
+            empleados_docs = list(
+                db.collection("usuarios").document(institucion_id).collection("empleados").stream()
+            )
+            if not empleados_docs:
+                st.info("Aún no hay empleados invitados.")
+            for doc_empleado in empleados_docs:
+                empleado = doc_empleado.to_dict() or {}
+                correo = empleado.get("email", doc_empleado.id)
+                estado = empleado.get("estado", "Activo")
+                key_correo = hashlib.sha256(correo.encode()).hexdigest()[:12]
+                with st.expander(f"{empleado.get('nombre', correo)} — {empleado.get('rol', 'Analista')} ({estado})"):
+                    st.write(f"**Correo:** {correo}")
                     if estado == "Revocado":
                         st.caption("Acceso revocado.")
-                        continue
-                    rango_actual = miembro.get("rol", "Analista")
-                    if not roles_asignables:
-                        st.caption("No hay rangos disponibles para asignar.")
-                        continue
-                    indice_rango = roles_asignables.index(rango_actual) if rango_actual in roles_asignables else 0
-                    rango_nuevo = st.selectbox("Rango", roles_asignables, index=indice_rango, key=f"rol_{correo_miembro}")
-                    col_guardar, col_revocar = st.columns(2)
-                    with col_guardar:
-                        if st.button("Actualizar rango", key=f"actualizar_{correo_miembro}"):
-                            try:
-                                db.collection("usuarios").document(empresa_id).collection("empleados").document(correo_miembro).update({"rol": rango_nuevo})
-                                db.collection("empleados_index").document(correo_miembro).set({"empresa_id": empresa_id, "rol": rango_nuevo, "nombre_empresa": nombre_empresa}, merge=True)
-                                cuenta_miembro_ref = db.collection("usuarios").document(correo_miembro)
-                                if cuenta_miembro_ref.get().exists:
-                                    cuenta_miembro_ref.set({"rol": rango_nuevo, "empresa_id": empresa_id}, merge=True)
-                                registrar_auditoria("Actualizó rango de integrante", f"{correo_miembro} → {rango_nuevo}")
+                    else:
+                        rol_actual_emp = empleado.get("rol", "Analista")
+                        opciones_roles = obtener_roles_asignables()
+                        indice = opciones_roles.index(rol_actual_emp) if rol_actual_emp in opciones_roles else 0
+                        nuevo_rol = st.selectbox(
+                            "Rango", opciones_roles, index=indice,
+                            key=f"rol_empleado_{key_correo}",
+                        )
+                        col_actualizar, col_revocar = st.columns(2)
+                        with col_actualizar:
+                            if st.button("Actualizar rango", key=f"actualizar_empleado_{key_correo}"):
+                                miembro_ref = db.collection("usuarios").document(institucion_id).collection("empleados").document(correo)
+                                miembro_ref.update({"rol": nuevo_rol})
+                                db.collection("empleados_index").document(correo).set({
+                                    "empresa_id": institucion_id,
+                                    "rol": nuevo_rol,
+                                    "nombre_empresa": (st.session_state.user_data or {}).get("institucion", ""),
+                                }, merge=True)
+                                user_ref = db.collection("usuarios").document(correo)
+                                if user_ref.get().exists:
+                                    user_ref.update({"rol": nuevo_rol})
+                                registrar_auditoria("Actualizó rango de empleado", f"{correo} → {nuevo_rol}")
                                 st.success("Rango actualizado.")
                                 st.rerun()
-                            except Exception as e:
-                                st.error(f"No se pudo actualizar el rango: {e}")
-                    with col_revocar:
-                        if st.button("Revocar acceso", key=f"revocar_{correo_miembro}"):
-                            try:
-                                db.collection("usuarios").document(empresa_id).collection("empleados").document(correo_miembro).update({"estado": "Revocado"})
-                                db.collection("empleados_index").document(correo_miembro).delete()
-                                registrar_auditoria("Revocó acceso de integrante", correo_miembro)
-                                st.success("Acceso revocado. La app lo bloqueará en la siguiente interacción.")
+                        with col_revocar:
+                            if st.button("Revocar acceso", key=f"revocar_empleado_{key_correo}"):
+                                db.collection("usuarios").document(institucion_id).collection("empleados").document(correo).update({
+                                    "estado": "Revocado",
+                                    "revocado_en": dt_module.datetime.now(dt_module.timezone.utc).isoformat(),
+                                })
+                                db.collection("empleados_index").document(correo).delete()
+                                registrar_auditoria("Revocó acceso de empleado", correo)
+                                st.warning("Acceso revocado. Su sesión se cerrará en la próxima interacción.")
                                 st.rerun()
-                            except Exception as e:
-                                st.error(f"No se pudo revocar el acceso: {e}")
         except Exception as e:
             st.warning(f"No se pudo cargar el equipo: {e}")
-        if len(miembros) == limite_miembros and st.button("Cargar más integrantes", key="cargar_mas_integrantes"):
-            st.session_state.equipo_mostrar_hasta += 100
-            st.rerun()
-
-elif menu == "Acceso restringido":
-    st.markdown('<p class="main-header">Acceso restringido</p>', unsafe_allow_html=True)
-    st.info("Tu rango aún no tiene funciones asignadas. Contacta al propietario de la empresa.")
